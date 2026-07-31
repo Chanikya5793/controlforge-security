@@ -1,0 +1,34 @@
+agents:
+  - agent_id: crowdstrike-falcon
+    display_name: CrowdStrike Falcon Sensor
+    process_names:
+      - falcon-sensor
+      - falcond
+      - csfalconservice.exe
+    install_paths:
+      - /Applications/Falcon.app
+      - /opt/CrowdStrike/falconctl
+      - C:\Program Files\CrowdStrike\CSFalconService.exe
+    heartbeat_max_age_seconds: 900
+
+  - agent_id: microsoft-defender
+    display_name: Microsoft Defender for Endpoint
+    process_names:
+      - wdavdaemon
+      - MsMpEng.exe
+    install_paths:
+      - /Applications/Microsoft Defender.app
+      - /opt/microsoft/mdatp
+      - C:\Program Files\Windows Defender\MsMpEng.exe
+    heartbeat_max_age_seconds: 900
+
+  - agent_id: sentinelone
+    display_name: SentinelOne Agent
+    process_names:
+      - sentinel-agent
+      - SentinelAgent.exe
+    install_paths:
+      - /Library/Sentinel/sentinel-agent.bundle
+      - /opt/sentinelone/bin/sentinel-agent
+      - C:\Program Files\SentinelOne\Sentinel Agent\SentinelAgent.exe
+    heartbeat_max_age_seconds: 900

@@ -1,0 +1,21 @@
+id: CF-IDENTITY-002
+title: Privileged role granted outside approved workflow
+description: Detects high-impact role grants without an approved change reference.
+status: experimental
+logsource:
+  category: iam
+detection:
+  selection:
+    event_type: privileged_role_grant
+    role:
+      - administrator
+      - security-admin
+      - database-owner
+  approved_change:
+    change_ticket|startswith: CHG-
+  condition: selection and not approved_change
+level: critical
+tags:
+  - identity
+  - privilege-escalation
+  - insider-risk

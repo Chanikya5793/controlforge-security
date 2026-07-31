@@ -1,0 +1,5 @@
+{"event_id":"evt-001","event_type":"process_start","timestamp":"2026-08-11T14:00:00Z","actor":"workstation\\analyst","target":"WS-104","attributes":{"process_name":"powershell.exe","command_line":"powershell.exe -enc SQBFAFgA"}}
+{"event_id":"evt-002","event_type":"email_received","timestamp":"2026-08-11T14:01:00Z","actor":"employee@example.com","source_ip":"203.0.113.24","attributes":{"dmarc":"fail","sender_domain":"secure-update.example","url_path":"/account/verify/login"}}
+{"event_id":"evt-003","event_type":"privileged_role_grant","timestamp":"2026-08-11T14:02:00Z","actor":"contractor@example.com","target":"production-finance-db","attributes":{"role":"database-owner","change_ticket":"none"}}
+{"event_id":"evt-004","event_type":"authentication_success","timestamp":"2026-08-11T14:03:00Z","actor":"employee@example.com","source_ip":"198.51.100.8","attributes":{"latitude":37.7749,"longitude":-122.4194}}
+{"event_id":"evt-005","event_type":"authentication_success","timestamp":"2026-08-11T14:33:00Z","actor":"employee@example.com","source_ip":"192.0.2.19","attributes":{"latitude":40.7128,"longitude":-74.0060}}
