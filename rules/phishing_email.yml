@@ -15,7 +15,7 @@ detection:
       - password
   selection_domain:
     sender_domain|re: "(xn--|[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)"
-  condition: selection_auth and selection_link or selection_domain
+  condition: selection_auth and (selection_link or selection_domain)
 level: high
 tags:
   - phishing

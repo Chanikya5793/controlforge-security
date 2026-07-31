@@ -55,6 +55,65 @@ def test_privilege_grant_excludes_approved_change(project_root) -> None:  # type
     assert DetectionPipeline(rules).evaluate(event) == []
 
 
+def test_phishing_rule_requires_failed_authentication_for_lookalike_domain(project_root) -> None:  # type: ignore[no-untyped-def]
+    rules = load_rules(project_root / "rules")
+    event = SecurityEvent(
+        event_id="evt-authenticated-international-domain",
+        event_type="email_received",
+        timestamp=datetime(2026, 8, 11, 14, 0, tzinfo=timezone.utc),
+        actor="sender@xn--bcher-kva.example",
+        attributes={
+            "dmarc": "pass",
+            "url_path": "/newsletter/weekly",
+            "sender_domain": "xn--bcher-kva.example",
+        },
+    )
+
+    assert DetectionPipeline(rules).evaluate(event) == []
+
+
+@pytest.mark.parametrize(
+    ("url_path", "sender_domain"),
+    [
+        ("/account/verify", "example.com"),
+        ("/newsletter/weekly", "xn--paypa-4ve.example"),
+    ],
+)
+def test_phishing_rule_matches_failed_auth_with_link_or_lookalike_domain(
+    project_root, url_path: str, sender_domain: str
+) -> None:  # type: ignore[no-untyped-def]
+    rules = load_rules(project_root / "rules")
+    event = SecurityEvent(
+        event_id=f"evt-phishing-{url_path}-{sender_domain}",
+        event_type="email_received",
+        timestamp=datetime(2026, 8, 11, 14, 0, tzinfo=timezone.utc),
+        actor="sender@example.com",
+        attributes={
+            "dmarc": "fail",
+            "url_path": url_path,
+            "sender_domain": sender_domain,
+        },
+    )
+
+    alerts = DetectionPipeline(rules).evaluate(event)
+    assert [alert.rule_id for alert in alerts] == ["CF-EMAIL-001"]
+
+
+def test_parenthesized_condition_rejects_unclosed_group(base_event) -> None:  # type: ignore[no-untyped-def]
+    rule = SigmaRule(
+        id="TEST-PAREN",
+        title="Test malformed parentheses",
+        detection={
+            "selection_a": {"event_type": "authentication_failure"},
+            "selection_b": {"actor": "analyst@example.com"},
+            "condition": "selection_a and (selection_b or selection_a",
+        },
+    )
+
+    with pytest.raises(ValueError, match="unclosed parenthesis"):
+        SigmaSubsetEvaluator().evaluate(rule, base_event)
+
+
 def test_cidr_modifier_matches_source_ip(base_event) -> None:  # type: ignore[no-untyped-def]
     rule = SigmaRule(
         id="TEST-CIDR",
