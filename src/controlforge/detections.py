@@ -54,6 +54,16 @@ class SigmaSubsetEvaluator:
         "re",
         "cidr",
     }
+    _CONDITION_TOKEN: ClassVar[re.Pattern[str]] = re.compile(
+        r"\s*("
+        r"1\s+of\s+[a-zA-Z0-9_*?-]+|"
+        r"all\s+of\s+[a-zA-Z0-9_*?-]+|"
+        r"and\b|or\b|not\b|"
+        r"\(|\)|"
+        r"[a-zA-Z0-9_*?-]+"
+        r")",
+        flags=re.IGNORECASE,
+    )
 
     def evaluate(self, rule: SigmaRule, event: SecurityEvent) -> Optional[DetectionAlert]:
         raw_condition = rule.detection.get("condition")
@@ -88,41 +98,93 @@ class SigmaSubsetEvaluator:
         selections: Mapping[str, object],
         event: SecurityEvent,
     ) -> tuple[bool, list[str]]:
-        normalized = condition.strip()
-        or_parts = normalized.split(" or ")
-        if len(or_parts) > 1:
-            results = [self._evaluate_condition(part, selections, event) for part in or_parts]
-            for matched, reasons in results:
-                if matched:
-                    return True, reasons
-            return False, []
+        tokens = self._tokenize_condition(condition)
+        position = 0
 
-        and_parts = normalized.split(" and ")
-        if len(and_parts) > 1 and " and not " not in normalized:
-            results = [self._evaluate_condition(part, selections, event) for part in and_parts]
-            if not all(result[0] for result in results):
-                return False, []
-            return True, [reason for result in results for reason in result[1]]
+        def current() -> Optional[str]:
+            return tokens[position] if position < len(tokens) else None
 
-        one_of_match = re.fullmatch(r"1 of ([a-zA-Z0-9_*?-]+)", normalized)
-        if one_of_match:
-            pattern = one_of_match.group(1)
-            candidates = [name for name in selections if fnmatch.fnmatch(name, pattern)]
-            return self._evaluate_any(candidates, selections, event)
+        def parse_primary() -> tuple[bool, list[str]]:
+            nonlocal position
+            symbol = current()
+            if symbol is None:
+                raise ValueError("unexpected end of Sigma condition")
+            if symbol == "(":
+                position += 1
+                result = parse_or()
+                if current() != ")":
+                    raise ValueError("unclosed parenthesis in Sigma condition")
+                position += 1
+                return result
+            if symbol == ")":
+                raise ValueError("unexpected closing parenthesis in Sigma condition")
 
-        all_of_match = re.fullmatch(r"all of ([a-zA-Z0-9_*?-]+)", normalized)
-        if all_of_match:
-            pattern = all_of_match.group(1)
-            candidates = [name for name in selections if fnmatch.fnmatch(name, pattern)]
-            return self._evaluate_all(candidates, selections, event)
+            position += 1
+            one_of_match = re.fullmatch(r"1 of ([a-zA-Z0-9_*?-]+)", symbol)
+            if one_of_match:
+                pattern = one_of_match.group(1)
+                candidates = [name for name in selections if fnmatch.fnmatch(name, pattern)]
+                return self._evaluate_any(candidates, selections, event)
 
-        and_not = normalized.split(" and not ")
-        if len(and_not) == 2:
-            positive, positive_reasons = self._evaluate_named(and_not[0], selections, event)
-            negative, _ = self._evaluate_named(and_not[1], selections, event)
-            return positive and not negative, positive_reasons if positive and not negative else []
+            all_of_match = re.fullmatch(r"all of ([a-zA-Z0-9_*?-]+)", symbol)
+            if all_of_match:
+                pattern = all_of_match.group(1)
+                candidates = [name for name in selections if fnmatch.fnmatch(name, pattern)]
+                return self._evaluate_all(candidates, selections, event)
 
-        return self._evaluate_named(normalized, selections, event)
+            return self._evaluate_named(symbol, selections, event)
+
+        def parse_not() -> tuple[bool, list[str]]:
+            nonlocal position
+            if current() == "not":
+                position += 1
+                matched, _ = parse_not()
+                return not matched, []
+            return parse_primary()
+
+        def parse_and() -> tuple[bool, list[str]]:
+            nonlocal position
+            matched, reasons = parse_not()
+            while current() == "and":
+                position += 1
+                right_matched, right_reasons = parse_not()
+                if matched and right_matched:
+                    reasons = [*reasons, *right_reasons]
+                else:
+                    matched, reasons = False, []
+            return matched, reasons
+
+        def parse_or() -> tuple[bool, list[str]]:
+            nonlocal position
+            matched, reasons = parse_and()
+            while current() == "or":
+                position += 1
+                right_matched, right_reasons = parse_and()
+                if not matched and right_matched:
+                    matched, reasons = True, right_reasons
+            return matched, reasons
+
+        result = parse_or()
+        if position != len(tokens):
+            raise ValueError(f"unexpected token in Sigma condition: {tokens[position]}")
+        return result
+
+    def _tokenize_condition(self, condition: str) -> list[str]:
+        tokens: list[str] = []
+        position = 0
+        while position < len(condition):
+            match = self._CONDITION_TOKEN.match(condition, position)
+            if match is None:
+                if condition[position:].strip() == "":
+                    break
+                raise ValueError(f"unsupported Sigma condition near: {condition[position:]}")
+            token = re.sub(r"\s+", " ", match.group(1).strip())
+            lowered = token.casefold()
+            tokens.append(lowered if lowered in {"and", "or", "not"} else token)
+            position = match.end()
+        if not tokens:
+            raise ValueError("Sigma condition cannot be empty")
+        return tokens
 
     def _evaluate_any(
         self,
