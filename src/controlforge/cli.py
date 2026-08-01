@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Optional
@@ -14,6 +16,7 @@ from pydantic import ValidationError
 from .config import load_control_config
 from .controls import EndpointAssuranceEngine
 from .detections import DetectionPipeline, load_rules
+from .exposure import ExposureService, HibpClient, HibpError
 from .models import SecurityEvent
 from .probes import LocalSystemProbe
 from .service import DetectionService
@@ -54,6 +57,15 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--rules", type=Path, default=Path("rules"))
     scan.add_argument("--database", type=Path, default=Path("controlforge.db"))
 
+    exposures = subcommands.add_parser(
+        "exposures",
+        help="scan a verified domain for breach and optional infostealer exposure",
+    )
+    exposures.add_argument("--domain", required=True)
+    exposures.add_argument("--database", type=Path, default=Path("controlforge.db"))
+    exposures.add_argument("--api-key-env", default="HIBP_API_KEY")
+    exposures.add_argument("--include-stealer-logs", action="store_true")
+
     serve = subcommands.add_parser("serve", help="start the HTTP API")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8080)
@@ -71,11 +83,23 @@ def run(arguments: Optional[Sequence[str]] = None) -> int:
 
     if args.command == "scan":
         pipeline = DetectionPipeline(load_rules(args.rules))
-        result = DetectionService(pipeline, AuditStore(args.database)).process(
+        scan_result = DetectionService(pipeline, AuditStore(args.database)).process(
             _load_events(args.events)
         )
-        _print_json(result)
-        return 1 if result.alerts else 0
+        _print_json(scan_result)
+        return 1 if scan_result.alerts else 0
+
+    if args.command == "exposures":
+        api_key = os.environ.get(args.api_key_env)
+        if not api_key:
+            raise ValueError(f"missing HIBP API key in environment variable {args.api_key_env}")
+        records = HibpClient(api_key).scan_verified_domain(
+            args.domain,
+            include_stealer_logs=args.include_stealer_logs,
+        )
+        exposure_result = ExposureService(AuditStore(args.database)).process(records)
+        _print_json(exposure_result)
+        return 1 if exposure_result.alerts else 0
 
     if args.command == "serve":
         uvicorn.run("controlforge.api:app", host=args.host, port=args.port)
@@ -85,4 +109,9 @@ def run(arguments: Optional[Sequence[str]] = None) -> int:
 
 
 def main() -> None:
-    raise SystemExit(run())
+    try:
+        exit_code = run()
+    except (HibpError, OSError, ValueError) as exc:
+        print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        exit_code = 3
+    raise SystemExit(exit_code)

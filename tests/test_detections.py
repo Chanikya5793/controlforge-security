@@ -4,8 +4,10 @@ import pytest
 
 from controlforge.detections import (
     BulkAccessDetector,
+    CredentialStuffingDetector,
     DetectionPipeline,
     ImpossibleTravelDetector,
+    SessionReplayDetector,
     SigmaRule,
     SigmaSubsetEvaluator,
     load_rules,
@@ -196,3 +198,106 @@ def test_impossible_travel_detector_alerts() -> None:
 def test_impossible_travel_ignores_missing_coordinates(base_event) -> None:  # type: ignore[no-untyped-def]
     event = base_event.model_copy(update={"event_type": "authentication_success"})
     assert ImpossibleTravelDetector().evaluate(event) is None
+
+
+@pytest.mark.parametrize(
+    ("event_id", "event_type", "attributes", "expected_rule"),
+    [
+        (
+            "office-child",
+            "process_start",
+            {"parent_process_name": "WINWORD.EXE", "process_name": "powershell.exe"},
+            "CF-ENDPOINT-002",
+        ),
+        (
+            "lsass-dump",
+            "process_start",
+            {
+                "process_name": "rundll32.exe",
+                "command_line": (
+                    "rundll32 C:\\Windows\\System32\\comsvcs.dll MiniDump 620 lsass.dmp"
+                ),
+            },
+            "CF-ENDPOINT-003",
+        ),
+        (
+            "run-key",
+            "registry_value_set",
+            {"registry_path": ("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Updater")},
+            "CF-ENDPOINT-004",
+        ),
+        (
+            "edge-probe",
+            "edge_http_request",
+            {"request_path": "/.git/config"},
+            "CF-EDGE-001",
+        ),
+    ],
+)
+def test_endpoint_and_edge_rules_match(
+    project_root, event_id: str, event_type: str, attributes: dict[str, object], expected_rule: str
+) -> None:  # type: ignore[no-untyped-def]
+    event = SecurityEvent(
+        event_id=event_id,
+        event_type=event_type,
+        timestamp=datetime(2026, 8, 12, 15, 0, tzinfo=timezone.utc),
+        actor="user@example.com",
+        source_ip="198.51.100.44",
+        attributes=attributes,
+    )
+    alerts = DetectionPipeline(load_rules(project_root / "rules")).evaluate(event)
+    assert expected_rule in {alert.rule_id for alert in alerts}
+
+
+def test_credential_stuffing_detector_requires_failures_across_accounts() -> None:
+    detector = CredentialStuffingDetector(failure_threshold=4, account_threshold=3)
+    start = datetime(2026, 8, 12, 15, 0, tzinfo=timezone.utc)
+    alert = None
+    for index, account in enumerate(
+        ["a@example.com", "b@example.com", "c@example.com", "a@example.com"]
+    ):
+        alert = detector.evaluate(
+            SecurityEvent(
+                event_id=f"failure-{index}",
+                event_type="edge_auth_failure",
+                timestamp=start + timedelta(seconds=index * 10),
+                actor=account,
+                source_ip="198.51.100.44",
+            )
+        )
+    assert alert is not None
+    assert alert.rule_id == "CF-EDGE-002"
+    assert "3 distinct accounts" in alert.reasons[1]
+
+
+def test_session_replay_detector_alerts_on_cross_ip_reuse() -> None:
+    detector = SessionReplayDetector()
+    first = SecurityEvent(
+        event_id="session-first",
+        event_type="edge_session_use",
+        timestamp=datetime(2026, 8, 12, 15, 0, tzinfo=timezone.utc),
+        actor="user@example.com",
+        source_ip="198.51.100.10",
+        attributes={"session_id_hash": "a" * 64},
+    )
+    second = first.model_copy(
+        update={
+            "event_id": "session-second",
+            "timestamp": first.timestamp + timedelta(minutes=2),
+            "source_ip": "203.0.113.20",
+        }
+    )
+    assert detector.evaluate(first) is None
+    alert = detector.evaluate(second)
+    assert alert is not None
+    assert alert.rule_id == "CF-EDGE-003"
+
+
+def test_session_replay_detector_ignores_raw_or_short_session_identifier(base_event) -> None:  # type: ignore[no-untyped-def]
+    event = base_event.model_copy(
+        update={
+            "event_type": "edge_session_use",
+            "attributes": {"session_id_hash": "short"},
+        }
+    )
+    assert SessionReplayDetector().evaluate(event) is None

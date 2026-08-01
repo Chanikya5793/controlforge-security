@@ -5,6 +5,7 @@ import pytest
 
 from controlforge import cli
 from controlforge.config import load_control_config
+from controlforge.exposure import HibpError
 from controlforge.models import EndpointSnapshot
 from controlforge.probes import FixtureSystemProbe, LocalSystemProbe
 
@@ -82,3 +83,15 @@ def test_cli_serve_delegates_to_uvicorn(monkeypatch) -> None:  # type: ignore[no
     monkeypatch.setattr(cli.uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
     assert cli.run(["serve", "--host", "127.0.0.1", "--port", "9090"]) == 0
     assert calls[0][1] == {"host": "127.0.0.1", "port": 9090}
+
+
+def test_cli_main_reports_provider_error_without_traceback(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    def fail() -> int:
+        raise HibpError("HIBP request failed with HTTP 401")
+
+    monkeypatch.setattr(cli, "run", fail)
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+
+    assert exit_info.value.code == 3
+    assert capsys.readouterr().err == '{"error": "HIBP request failed with HTTP 401"}\n'

@@ -1,0 +1,20 @@
+id: CF-ENDPOINT-004
+title: User-level Run key persistence
+description: Detects writes to Windows Run and RunOnce registry locations.
+status: experimental
+logsource:
+  category: registry_set
+  product: windows
+detection:
+  selection_event:
+    event_type: registry_value_set
+  selection_path:
+    registry_path|contains:
+      - "\\software\\microsoft\\windows\\currentversion\\run\\"
+      - "\\software\\microsoft\\windows\\currentversion\\runonce\\"
+  condition: selection_event and selection_path
+level: medium
+tags:
+  - attack.persistence
+  - attack.t1060
+  - endpoint-security

@@ -1,0 +1,22 @@
+id: CF-EDGE-001
+title: Sensitive path discovery at the application edge
+description: Detects requests for commonly exposed secrets, source-control metadata, and admin paths.
+status: experimental
+logsource:
+  category: webserver
+detection:
+  selection_event:
+    event_type: edge_http_request
+  selection_path:
+    request_path|contains:
+      - "/.env"
+      - "/.git/config"
+      - "/server-status"
+      - "/actuator/env"
+      - "/wp-admin"
+  condition: selection_event and selection_path
+level: medium
+tags:
+  - edge-security
+  - attack.discovery
+  - attack.t1083

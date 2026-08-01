@@ -404,6 +404,98 @@ class ImpossibleTravelDetector:
         return radius_km * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
 
 
+class CredentialStuffingDetector:
+    """Detect one edge source failing authentication across many accounts."""
+
+    def __init__(
+        self,
+        failure_threshold: int = 20,
+        account_threshold: int = 10,
+        window: timedelta = timedelta(minutes=5),
+    ) -> None:
+        self._failure_threshold = failure_threshold
+        self._account_threshold = account_threshold
+        self._window = window
+        self._history: dict[str, deque[tuple[datetime, str, str]]] = defaultdict(deque)
+
+    def evaluate(self, event: SecurityEvent) -> Optional[DetectionAlert]:
+        if event.event_type != "edge_auth_failure" or not event.source_ip:
+            return None
+
+        history = self._history[event.source_ip]
+        history.append((event.timestamp, event.actor, event.event_id))
+        cutoff = event.timestamp - self._window
+        while history and history[0][0] < cutoff:
+            history.popleft()
+
+        distinct_accounts = {item[1].casefold() for item in history}
+        if (
+            len(history) < self._failure_threshold
+            or len(distinct_accounts) < self._account_threshold
+        ):
+            return None
+
+        fingerprint = f"credential-stuffing:{event.source_ip}:{event.event_id}".encode()
+        return DetectionAlert(
+            alert_id=hashlib.sha256(fingerprint).hexdigest()[:20],
+            rule_id="CF-EDGE-002",
+            title="Credential-stuffing pattern at the authentication edge",
+            severity=Severity.HIGH,
+            event_id=event.event_id,
+            actor=event.actor,
+            reasons=[
+                f"{len(history)} failed authentications from {event.source_ip}",
+                f"{len(distinct_accounts)} distinct accounts within "
+                f"{int(self._window.total_seconds() / 60)}m",
+            ],
+            tags=["edge-security", "credential-access", "account-takeover", "attack.t1110"],
+            created_at=event.timestamp,
+        )
+
+
+class SessionReplayDetector:
+    """Detect a hashed session identifier reused from a different source address."""
+
+    def __init__(self, window: timedelta = timedelta(minutes=10)) -> None:
+        self._window = window
+        self._previous: dict[str, tuple[datetime, str, str, str]] = {}
+
+    def evaluate(self, event: SecurityEvent) -> Optional[DetectionAlert]:
+        if event.event_type != "edge_session_use" or not event.source_ip:
+            return None
+        session_hash = event.attributes.get("session_id_hash")
+        if not isinstance(session_hash, str) or len(session_hash) < 12:
+            return None
+
+        previous = self._previous.get(session_hash)
+        self._previous[session_hash] = (
+            event.timestamp,
+            event.source_ip,
+            event.actor,
+            event.event_id,
+        )
+        if previous is None or event.timestamp <= previous[0]:
+            return None
+        if event.timestamp - previous[0] > self._window or event.source_ip == previous[1]:
+            return None
+
+        fingerprint = f"session-replay:{session_hash}:{event.event_id}".encode()
+        return DetectionAlert(
+            alert_id=hashlib.sha256(fingerprint).hexdigest()[:20],
+            rule_id="CF-EDGE-003",
+            title="Possible session replay across source addresses",
+            severity=Severity.HIGH,
+            event_id=event.event_id,
+            actor=event.actor,
+            reasons=[
+                f"session hash reused from {previous[1]} and {event.source_ip}",
+                f"reuse occurred within {int(self._window.total_seconds() / 60)}m",
+            ],
+            tags=["edge-security", "session-hijacking", "account-takeover"],
+            created_at=event.timestamp,
+        )
+
+
 class StatefulDetector(Protocol):
     def evaluate(self, event: SecurityEvent) -> Optional[DetectionAlert]:
         """Evaluate one event while retaining bounded detector state."""
@@ -416,6 +508,8 @@ class DetectionPipeline:
         self._stateful: list[StatefulDetector] = [
             BulkAccessDetector(),
             ImpossibleTravelDetector(),
+            CredentialStuffingDetector(),
+            SessionReplayDetector(),
         ]
 
     def evaluate(self, event: SecurityEvent) -> list[DetectionAlert]:

@@ -1,0 +1,29 @@
+id: CF-ENDPOINT-002
+title: Office application spawned a script or living-off-the-land binary
+description: Detects document applications launching shells and common proxy-execution utilities.
+status: experimental
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_parent:
+    parent_process_name|endswith:
+      - winword.exe
+      - excel.exe
+      - powerpnt.exe
+      - outlook.exe
+  selection_child:
+    process_name|endswith:
+      - powershell.exe
+      - pwsh.exe
+      - cmd.exe
+      - mshta.exe
+      - rundll32.exe
+      - wscript.exe
+      - cscript.exe
+  condition: selection_parent and selection_child
+level: high
+tags:
+  - attack.execution
+  - attack.t1204.002
+  - endpoint-security
