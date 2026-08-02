@@ -4,13 +4,21 @@ build-backend = "hatchling.build"
 
 [project]
 name = "controlforge-security"
-version = "0.1.0"
+version = "0.2.0"
 description = "Endpoint security-control assurance and detection automation platform"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Chanakya Thotakura" }]
-keywords = ["security", "detection-engineering", "sigma", "edr", "automation"]
+keywords = [
+  "security",
+  "detection-engineering",
+  "sigma",
+  "edr",
+  "exposure-monitoring",
+  "edge-security",
+  "automation",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: MIT License",
