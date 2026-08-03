@@ -1,0 +1,17 @@
+id: CF-MACOS-002
+title: macOS Gatekeeper policy override
+description: Detects a user or process overriding Gatekeeper policy for a file.
+status: stable
+logsource:
+  category: endpoint
+  product: macos
+detection:
+  selection:
+    event_type: santa_gatekeeper_override
+  condition: selection
+level: high
+tags:
+  - attack.defense-evasion
+  - attack.t1553.001
+  - endpoint-security
+  - north-pole-security-santa

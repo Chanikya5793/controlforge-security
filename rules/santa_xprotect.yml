@@ -1,0 +1,16 @@
+id: CF-MACOS-003
+title: XProtect malware event observed by Santa
+description: Detects an XProtect malware detection or remediation event reported by Santa.
+status: stable
+logsource:
+  category: antivirus
+  product: macos
+detection:
+  selection:
+    event_type: santa_xprotect
+  condition: selection
+level: critical
+tags:
+  - malware
+  - endpoint-security
+  - north-pole-security-santa

@@ -1,0 +1,17 @@
+id: CF-MACOS-001
+title: Santa denied executable launch
+description: Detects an execution denied by the Santa endpoint security system extension.
+status: stable
+logsource:
+  category: process_creation
+  product: macos
+detection:
+  selection:
+    event_type: santa_execution
+    decision: DECISION_DENY
+  condition: selection
+level: high
+tags:
+  - attack.execution
+  - endpoint-security
+  - north-pole-security-santa

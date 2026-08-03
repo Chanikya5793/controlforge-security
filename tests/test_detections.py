@@ -249,6 +249,46 @@ def test_endpoint_and_edge_rules_match(
     assert expected_rule in {alert.rule_id for alert in alerts}
 
 
+@pytest.mark.parametrize(
+    ("event_type", "attributes", "expected_rule"),
+    [
+        ("santa_execution", {"decision": "DECISION_DENY"}, "CF-MACOS-001"),
+        ("santa_gatekeeper_override", {}, "CF-MACOS-002"),
+        (
+            "santa_xprotect",
+            {"xprotect_event": "detected", "malware_identifier": "OSX.Test.Malware"},
+            "CF-MACOS-003",
+        ),
+    ],
+)
+def test_santa_rules_match_deterministically(
+    project_root, event_type: str, attributes: dict[str, object], expected_rule: str
+) -> None:  # type: ignore[no-untyped-def]
+    event = SecurityEvent(
+        event_id=f"event-{expected_rule}",
+        event_type=event_type,
+        timestamp=datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc),
+        actor="device:macbook-air-1",
+        attributes=attributes,
+    )
+
+    alerts = DetectionPipeline(load_rules(project_root / "rules")).evaluate(event)
+
+    assert [alert.rule_id for alert in alerts] == [expected_rule]
+
+
+def test_santa_allowed_execution_does_not_alert(project_root) -> None:  # type: ignore[no-untyped-def]
+    event = SecurityEvent(
+        event_id="event-santa-allowed",
+        event_type="santa_execution",
+        timestamp=datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc),
+        actor="device:macbook-air-1",
+        attributes={"decision": "DECISION_ALLOW"},
+    )
+
+    assert DetectionPipeline(load_rules(project_root / "rules")).evaluate(event) == []
+
+
 def test_credential_stuffing_detector_requires_failures_across_accounts() -> None:
     detector = CredentialStuffingDetector(failure_threshold=4, account_threshold=3)
     start = datetime(2026, 8, 12, 15, 0, tzinfo=timezone.utc)

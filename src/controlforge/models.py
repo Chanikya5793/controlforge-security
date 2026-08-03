@@ -85,6 +85,12 @@ class SecurityEvent(BaseModel):
     actor: str = Field(min_length=1)
     source_ip: Optional[str] = None
     target: Optional[str] = None
+    device_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
     attributes: dict[str, object] = Field(default_factory=dict)
 
 
