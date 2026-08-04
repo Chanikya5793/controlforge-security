@@ -1,0 +1,9 @@
+agents:
+  - agent_id: north-pole-security-santa
+    display_name: North Pole Security Santa
+    process_names:
+      - santad
+    install_paths:
+      - /Applications/Santa.app
+      - /usr/local/bin/santactl
+    heartbeat_max_age_seconds: 900

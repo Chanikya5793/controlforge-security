@@ -48,7 +48,7 @@ class LocalSystemProbe:
                 modified[normalized] = path.stat().st_mtime
 
         return EndpointSnapshot(
-            hostname=socket.gethostname(),
+            hostname=socket.gethostname().strip(),
             platform=platform.system().lower(),
             running_processes=processes,
             existing_paths=existing_paths,

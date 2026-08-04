@@ -1,3 +1,5 @@
+import io
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -83,6 +85,22 @@ def test_cli_serve_delegates_to_uvicorn(monkeypatch) -> None:  # type: ignore[no
     monkeypatch.setattr(cli.uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
     assert cli.run(["serve", "--host", "127.0.0.1", "--port", "9090"]) == 0
     assert calls[0][1] == {"host": "127.0.0.1", "port": 9090}
+
+
+def test_stdin_collector_secrets_are_strict_and_bounded() -> None:
+    payload = {
+        "credential-id": "3970e11f-f87c-4e14-9a90-d574cd2bcd95",
+        "credential-secret": "s" * 48,
+        "access-client-id": f"{'a' * 32}.access",
+        "access-client-secret": "b" * 64,
+    }
+    secrets = cli._load_stdin_collector_secrets(io.BytesIO(json.dumps(payload).encode()))
+    assert secrets.credential_id == payload["credential-id"]
+
+    with pytest.raises(ValueError, match="invalid fields"):
+        cli._load_stdin_collector_secrets(io.BytesIO(b'{"credential-id":"only-one"}'))
+    with pytest.raises(ValueError, match="exceeds 4 KB"):
+        cli._load_stdin_collector_secrets(io.BytesIO(b"x" * 4097))
 
 
 def test_cli_main_reports_provider_error_without_traceback(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
