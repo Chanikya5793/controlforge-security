@@ -10,3 +10,8 @@ __pycache__/
 build/
 dist/
 htmlcov/
+node_modules/
+coverage/
+.wrangler/
+*.dev.vars
+.dev.vars*

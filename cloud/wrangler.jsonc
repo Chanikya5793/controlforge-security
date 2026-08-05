@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "controlforge-soc",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "soc.chanakyachowdary.in",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "production",
+    "TRIAGE_PROVIDER": "meta",
+    "META_MODEL": "muse-spark-1.2-contributor",
+    "GEMINI_MODEL": "gemini-3.5-flash",
+    "ACCESS_TEAM_DOMAIN": "falling-poetry-892e.cloudflareaccess.com",
+    "ACCESS_AUD": "c808f3798beb8a8720ba2bdce888d712bfe7bde4e17b0063eac3f178eb51da27"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "controlforge-production",
+      "database_id": "8eea401d-2513-4beb-9fdf-b59d3c7113df",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "EVENT_QUEUE",
+        "queue": "controlforge-events"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "controlforge-events",
+        "max_batch_size": 50,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "controlforge-events-dlq"
+      }
+    ]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
+}
