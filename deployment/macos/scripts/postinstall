@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+/usr/sbin/chown -R root:wheel /Library/ControlForge "/Library/Application Support/ControlForge"
+/bin/chmod 755 /Library/ControlForge /Library/ControlForge/bin
+/bin/chmod 700 "/Library/Application Support/ControlForge"
+/bin/chmod 755 /Library/ControlForge/bin/controlforge
+/bin/chmod 755 /Library/ControlForge/bin/controlforge-runtime
+/bin/chmod 600 "/Library/Application Support/ControlForge/collector.yml"
+/bin/chmod 644 "/Library/Application Support/ControlForge/agents.yml"
+/usr/sbin/chown root:wheel /Library/LaunchDaemons/com.controlforge.agent.plist
+/bin/chmod 644 /Library/LaunchDaemons/com.controlforge.agent.plist
+
+exit 0

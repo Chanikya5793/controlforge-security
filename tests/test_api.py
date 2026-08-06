@@ -11,7 +11,7 @@ def test_health_endpoint(project_root, tmp_path) -> None:  # type: ignore[no-unt
     )
     response = TestClient(app).get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "0.2.0"}
+    assert response.json() == {"status": "ok", "version": "0.3.0"}
 
 
 def test_event_scan_and_alert_query(project_root, tmp_path) -> None:  # type: ignore[no-untyped-def]

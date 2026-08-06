@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadDisplayName</key>
+      <string>Santa Endpoint Security Extension</string>
+      <key>PayloadIdentifier</key>
+      <string>com.controlforge.santa.system-extension.E210264D-6E94-461B-948B-93695EE6CBB4</string>
+      <key>PayloadType</key>
+      <string>com.apple.system-extension-policy</string>
+      <key>PayloadUUID</key>
+      <string>E210264D-6E94-461B-948B-93695EE6CBB4</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>AllowedSystemExtensions</key>
+      <dict>
+        <key>ZMCG7MLDV9</key>
+        <array>
+          <string>com.northpolesec.santa.daemon</string>
+        </array>
+      </dict>
+      <key>AllowedSystemExtensionTypes</key>
+      <dict>
+        <key>ZMCG7MLDV9</key>
+        <array>
+          <string>EndpointSecurityExtension</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
+  <key>PayloadDescription</key>
+  <string>MDM-only preapproval for the North Pole Security Santa system extension.</string>
+  <key>PayloadDisplayName</key>
+  <string>ControlForge: Santa System Extension</string>
+  <key>PayloadIdentifier</key>
+  <string>com.controlforge.santa.system-extension</string>
+  <key>PayloadOrganization</key>
+  <string>ControlForge</string>
+  <key>PayloadScope</key>
+  <string>System</string>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>B5F7CD6C-1222-4501-BF96-484049F2CD9E</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+</dict>
+</plist>

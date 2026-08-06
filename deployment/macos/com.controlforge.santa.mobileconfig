@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadDisplayName</key>
+      <string>ControlForge Santa Configuration</string>
+      <key>PayloadIdentifier</key>
+      <string>com.controlforge.santa.configuration.D9258C27-FF40-4663-A917-B26C048A44F0</string>
+      <key>PayloadType</key>
+      <string>com.northpolesec.santa</string>
+      <key>PayloadUUID</key>
+      <string>D9258C27-FF40-4663-A917-B26C048A44F0</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>ClientMode</key>
+      <integer>1</integer>
+      <key>EnableBadSignatureProtection</key>
+      <false/>
+      <key>EventLogType</key>
+      <string>json</string>
+      <key>EventLogPath</key>
+      <string>/var/db/santa/santa.log</string>
+      <key>EnableMachineIDDecoration</key>
+      <true/>
+      <key>Telemetry</key>
+      <array>
+        <string>Execution</string>
+        <string>FileAccess</string>
+        <string>GatekeeperOverride</string>
+        <string>LaunchItem</string>
+        <string>TCCModification</string>
+        <string>XProtect</string>
+      </array>
+      <key>EntitlementsPrefixFilter</key>
+      <array>
+        <string>com.apple.private.</string>
+      </array>
+      <key>EntitlementsTeamIDFilter</key>
+      <array>
+        <string>platform</string>
+      </array>
+      <key>BrandingCompanyName</key>
+      <string>ControlForge</string>
+      <key>StaticRules</key>
+      <array>
+        <dict>
+          <key>identifier</key>
+          <string>ZMCG7MLDV9</string>
+          <key>policy</key>
+          <string>ALLOWLIST</string>
+          <key>rule_type</key>
+          <string>TEAMID</string>
+        </dict>
+      </array>
+    </dict>
+  </array>
+  <key>PayloadDescription</key>
+  <string>Configures Santa monitor mode and bounded JSON telemetry for ControlForge.</string>
+  <key>PayloadDisplayName</key>
+  <string>ControlForge: Santa</string>
+  <key>PayloadIdentifier</key>
+  <string>com.controlforge.santa</string>
+  <key>PayloadOrganization</key>
+  <string>ControlForge</string>
+  <key>PayloadRemovalDisallowed</key>
+  <false/>
+  <key>PayloadScope</key>
+  <string>System</string>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>1BE92988-1952-443B-8D1C-46C8557A8B83</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+</dict>
+</plist>

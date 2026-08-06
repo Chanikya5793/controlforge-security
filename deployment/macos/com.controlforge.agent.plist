@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.controlforge.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/ControlForge/bin/controlforge</string>
+    <string>agent</string>
+    <string>--config</string>
+    <string>/Library/Application Support/ControlForge/collector.yml</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Library/Application Support/ControlForge</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/var/log/controlforge-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/controlforge-agent-error.log</string>
+  <key>Disabled</key>
+  <true/>
+</dict>
+</plist>
