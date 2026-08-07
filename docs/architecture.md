@@ -50,11 +50,30 @@ The fixture probe allows every branch to be reproduced without requiring an EDR 
 - FastAPI exposes the same application services to integration clients.
 - OpenAPI schemas are generated from the same typed models used internally.
 
+### Cloud SOC path
+
+1. A fixed-host endpoint collector signs each request over its method, path, body hash,
+   timestamp, and nonce using an encrypted-at-rest collector credential.
+2. The Worker validates and tenant-scopes batches, writes idempotent D1 event records,
+   and enqueues newly accepted event identities.
+3. A queue consumer runs deterministic stateless and D1-windowed correlations, then
+   creates alerts and cases. At-least-once delivery is absorbed by stable identifiers.
+4. Audit events are HMAC-protected and database triggers make the audit table append-only.
+5. Read-only response actions can be policy-approved. Active or high-impact actions need
+   a different approving principal before a signed endpoint agent can retrieve them.
+6. The current endpoint agent supports read-only diagnostics only. Active actions remain
+   unexecutable unless a separately implemented, installed, and field-tested adapter is added;
+   unsupported actions fail closed.
+
 ## Deliberate trade-offs
 
 - **Local SQLite over a managed database:** reduces setup cost and keeps the project reproducible. The store interface can later be backed by PostgreSQL.
 - **Documented Sigma subset over pretending full compatibility:** keeps evaluation behavior understandable and fully tested. Full pySigma interoperability remains roadmap work.
 - **Read-only local probes over vendor credentials:** demonstrates control-health architecture without inventing production integrations or encouraging unsafe credential handling.
 - **Sanctioned exposure API over dark-web scraping:** HIBP provides attributable, authorized breach and infostealer intelligence without crawling criminal forums or retaining leaked credentials.
-- **Model-assisted explanation over model-authored detection:** deterministic rules remain the security decision boundary; Gemini can organize evidence but cannot create or close an incident.
-- **Synchronous API processing:** appropriate for bounded demo batches; production ingestion would use authentication, queues, backpressure, and isolated workers.
+- **Model-assisted explanation over model-authored detection:** deterministic rules remain the security decision boundary; a configured model adapter can organize evidence but cannot create or close an incident.
+- **Synchronous local FastAPI processing:** remains useful for bounded local scans; the
+  Cloudflare control plane uses authenticated queue-backed ingestion for deployment.
+- **D1 and Queues for the initial cloud control plane:** make deployment reproducible and
+  provide durable asynchronous processing. Enterprise-volume retention should add
+  per-tenant database sharding and immutable R2 archives.

@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-ControlForge is a Python platform for continuously verifying endpoint security controls and converting raw security and exposure intelligence into explainable detections. It combines read-only agent-health checks, a documented Sigma-style rule subset, stateful endpoint, edge, identity, and insider-risk analytics, privacy-preserving breach monitoring, SQLite audit storage, a CLI, and a FastAPI service.
+ControlForge is a security-control assurance, detection, and SOC case-management platform. Its Python package provides endpoint assurance, local detection, exposure monitoring, a signed endpoint collector, SQLite audit storage, a CLI, and FastAPI. Its Cloudflare control plane adds authenticated multi-tenant ingestion, D1 persistence, queue-backed correlation, cases, an analyst dashboard, append-only audit records, approval-gated response actions, and optional evidence-bounded model triage.
 
 It is an engineering portfolio project built with public fixtures plus a live, sanctioned Have I Been Pwned integration. Endpoint-vendor configurations demonstrate extensible control checks; they do **not** imply access to vendor tenants or production customer data. Exposure scans require a domain the operator is authorized to query.
 
@@ -34,16 +34,19 @@ flowchart LR
 
 ## Capabilities
 
-- **Endpoint control assurance:** validates configured install evidence, process state, and optional heartbeat freshness. Example configurations cover CrowdStrike Falcon, Microsoft Defender for Endpoint, and SentinelOne.
+- **Endpoint control assurance:** validates configured install evidence, process state, and optional heartbeat freshness. The production macOS configuration uses open-source North Pole Security Santa; vendor definitions remain interoperability fixtures.
 - **Detection-as-code:** loads version-controlled YAML rules, validates their schema, and emits deterministic alert IDs and human-readable match reasons.
 - **Supported Sigma-style operators:** equality/wildcards, `contains`, `startswith`, `endswith`, regular expressions, CIDR membership, parenthesized expressions, `not`, `and`, `or`, `1 of`, and `all of`, with standard boolean precedence.
 - **Stateful analytics:** detects impossible-travel authentication and unusual sensitive-data access volume.
 - **Endpoint behavior detections:** covers suspicious Office child processes, LSASS credential-dumping patterns, and Windows Run-key persistence with ATT&CK-aligned tags.
 - **Application-edge detections:** detects sensitive-path reconnaissance, credential stuffing across accounts, and hashed session reuse across source addresses.
 - **Exposure intelligence:** queries Have I Been Pwned's verified-domain breach and optional infostealer-log APIs, immediately hashes account aliases, and stores no plaintext aliases or credentials.
-- **Evidence-bounded AI triage:** uses Gemini structured output to summarize alerts, reference only supplied evidence, treat telemetry as untrusted prompt content, and require human review before any response decision.
+- **Evidence-bounded AI triage:** uses schema-constrained Meta Model API or Gemini output to summarize alerts, reference only supplied evidence, treat telemetry as untrusted prompt content, and require human review before any response decision. The deployed Cloudflare runtime selects Meta's contributor tier.
 - **Investigation workflow:** persists normalized events and deduplicated alerts in SQLite, with bounded alert retrieval.
 - **Operational interfaces:** command-line scanning plus a typed FastAPI service with OpenAPI documentation.
+- **Cloud SOC control plane:** a TypeScript Worker uses D1, Queues, a dead-letter queue, tenant scoping, signed collector requests, automatic cases, and a hardened analyst dashboard.
+- **Endpoint collector:** durable SQLite spooling, HMAC-authenticated delivery, replay-resistant requests, macOS System-keychain secrets, bounded Santa JSONL cursors, and structured read-only diagnostic actions.
+- **Response governance:** read-only actions may be policy-approved; active and high-impact changes require a second human principal and a separately installed endpoint adapter.
 - **Safety controls:** read-only endpoint probes, no shell interpolation, bounded input batches, parameterized SQL, non-secret fixtures, static analysis, and dependency-light packaging.
 
 ## Quick start
@@ -68,6 +71,11 @@ controlforge exposures --domain example.com --include-stealer-logs || true
 
 # Start the API and open http://127.0.0.1:8080/docs
 controlforge serve --host 127.0.0.1 --port 8080
+
+# Run one signed endpoint collection cycle after configuring config/collector.yml
+# Set the ControlForge HMAC credential plus the Cloudflare Access service credential.
+# Keep all four values in a secret store; never place them in collector.yml.
+controlforge agent --config config/collector.yml
 ```
 
 ## API
@@ -113,6 +121,7 @@ Included rules cover:
 - impossible-travel authentication correlation;
 - bulk sensitive-data access correlation.
 - verified-domain breach and infostealer exposure.
+- Santa-denied executions, Gatekeeper overrides, and XProtect malware events.
 
 Each alert includes a stable fingerprint, rule identifier, severity, actor, source event, matched evidence, and investigation tags.
 
@@ -137,6 +146,9 @@ The verification target runs:
 - [Architecture](docs/architecture.md)
 - [Threat model](docs/threat-model.md)
 - [Security policy](SECURITY.md)
+- [Production-oriented Cloudflare architecture](docs/production-architecture.md)
+- [Verified Cloudflare deployment evidence](docs/DEPLOYMENT_EVIDENCE.md)
+- [macOS Santa deployment, signing, and notarization](docs/macos-production.md)
 
 ## Roadmap
 
@@ -145,6 +157,7 @@ The verification target runs:
 - Signed webhook ingestion and queue-backed processing
 - OpenTelemetry metrics and rule-performance dashboards
 - Analyst dispositions and false-positive feedback loops
+- Tested operating-system containment adapters and enterprise identity-provider rollout
 
 ## License
 
