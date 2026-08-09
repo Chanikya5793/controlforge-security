@@ -1,0 +1,17 @@
+{
+  "fingerprint_version": "controlforge-alert-v1",
+  "vectors": [
+    {
+      "tenant_id": "00000000-0000-4000-8000-000000000001",
+      "rule_id": "CF-ENDPOINT-001",
+      "event_id": "event:one",
+      "expected_alert_id": "670ab42b811a684cadf09798ea7fbf93"
+    },
+    {
+      "tenant_id": "00000000-0000-4000-8000-000000000002",
+      "rule_id": "rule:with:colon",
+      "event_id": "event-two",
+      "expected_alert_id": "038f3c6771b269698d19f85bddf90045"
+    }
+  ]
+}

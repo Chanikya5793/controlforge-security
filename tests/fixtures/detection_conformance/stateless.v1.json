@@ -1,0 +1,324 @@
+{
+  "contract_version": "1.0",
+  "rules": {
+    "CF-EDGE-001": {
+      "rule_version": 1,
+      "rule_digest": "sha256:de9bb8dac72e6830a8821f24071fc9fc0ed286bb04a8691133df1c66ad2329a2",
+      "title": "Sensitive path discovery at the application edge",
+      "severity": "medium",
+      "tags": ["edge-security", "attack.discovery", "attack.t1083"]
+    },
+    "CF-EMAIL-001": {
+      "rule_version": 1,
+      "rule_digest": "sha256:48d639e3c9676021b6b207cc020e4452eba7d1cf49ede4b7137df3c437f75081",
+      "title": "High-confidence phishing email indicators",
+      "severity": "high",
+      "tags": ["phishing", "email-security", "social-engineering"]
+    },
+    "CF-ENDPOINT-001": {
+      "rule_version": 1,
+      "rule_digest": "sha256:da89a84a565d609c67793ed643e9a8d94e5a72cca59a95d8630ea4ab5591fc09",
+      "title": "Encoded PowerShell execution",
+      "severity": "high",
+      "tags": ["attack.execution", "attack.t1059.001", "endpoint-security"]
+    },
+    "CF-ENDPOINT-002": {
+      "rule_version": 1,
+      "rule_digest": "sha256:e92f73f7ac92ee58832d3f90111e9066caf485dab0a725f2d04e0e904e50095c",
+      "title": "Office application spawned a script or living-off-the-land binary",
+      "severity": "high",
+      "tags": ["attack.execution", "attack.t1204.002", "endpoint-security"]
+    },
+    "CF-ENDPOINT-003": {
+      "rule_version": 1,
+      "rule_digest": "sha256:fa12b890c14838458d748b7a1bb9f75e45eb14c671ff3d6fcb82611f200a42af",
+      "title": "Suspected LSASS credential dumping",
+      "severity": "critical",
+      "tags": ["attack.credential-access", "attack.t1003.001", "endpoint-security"]
+    },
+    "CF-ENDPOINT-004": {
+      "rule_version": 1,
+      "rule_digest": "sha256:a57cc61c259e45d100a0defd6e376df352db2da8e164e058a12a6459ad47a612",
+      "title": "User-level Run key persistence",
+      "severity": "medium",
+      "tags": ["attack.persistence", "attack.t1060", "endpoint-security"]
+    },
+    "CF-IDENTITY-002": {
+      "rule_version": 1,
+      "rule_digest": "sha256:d65bdf6b206a6d97a3d1a0e4ab6c6276ca0c56d9e3ce0a365df27ada17049263",
+      "title": "Privileged role granted outside approved workflow",
+      "severity": "critical",
+      "tags": ["identity", "privilege-escalation", "insider-risk"]
+    },
+    "CF-MACOS-001": {
+      "rule_version": 1,
+      "rule_digest": "sha256:3adec5159e9ebf10a512e890bd68b409266c5536802c390b994bc20b381e47a1",
+      "title": "Santa denied executable launch",
+      "severity": "high",
+      "tags": ["attack.execution", "endpoint-security", "north-pole-security-santa"]
+    },
+    "CF-MACOS-002": {
+      "rule_version": 1,
+      "rule_digest": "sha256:6cdf50acadee39bfeca5f86ad779e2e280c1d18c6a8dd033f7c11cc7dbc3b33a",
+      "title": "macOS Gatekeeper policy override",
+      "severity": "high",
+      "tags": ["attack.defense-evasion", "attack.t1553.001", "endpoint-security", "north-pole-security-santa"]
+    },
+    "CF-MACOS-003": {
+      "rule_version": 1,
+      "rule_digest": "sha256:0eaa8874be63e2c4bd65e43d7994eeebcd8fde849710af86e2dcf0d2f07b3b6d",
+      "title": "XProtect malware event observed by Santa",
+      "severity": "critical",
+      "tags": ["malware", "endpoint-security", "north-pole-security-santa"]
+    }
+  },
+  "vectors": [
+    {
+      "id": "encoded-powershell",
+      "event": {
+        "event_id": "vector-powershell",
+        "event_type": "process_start",
+        "timestamp": "2026-08-22T12:00:00Z",
+        "actor": "user@example.com",
+        "attributes": {
+          "process_name": "C:\\Windows\\System32\\PowerShell.EXE",
+          "command_line": "powershell.exe -EncodedCommand SQBFAFgA"
+        }
+      },
+      "expected_rule_ids": ["CF-ENDPOINT-001"],
+      "expected_reasons": [
+        "event_type matched \"process_start\"",
+        "process_name|endswith matched [\"powershell.exe\",\"pwsh.exe\"]",
+        "command_line|contains matched [\" -enc \",\" -encodedcommand \"]"
+      ]
+    },
+    {
+      "id": "benign-process",
+      "event": {
+        "event_id": "vector-benign",
+        "event_type": "process_start",
+        "timestamp": "2026-08-22T12:01:00Z",
+        "actor": "user@example.com",
+        "attributes": { "process_name": "notepad.exe", "command_line": "notepad notes.txt" }
+      },
+      "expected_rule_ids": [],
+      "expected_reasons": []
+    },
+    {
+      "id": "office-child-process",
+      "event": {
+        "event_id": "vector-office-child",
+        "event_type": "process_start",
+        "timestamp": "2026-08-22T12:02:00Z",
+        "actor": "user@example.com",
+        "attributes": { "parent_process_name": "WINWORD.EXE", "process_name": "cmd.exe" }
+      },
+      "expected_rule_ids": ["CF-ENDPOINT-002"],
+      "expected_reasons": [
+        "event_type matched \"process_start\"",
+        "parent_process_name|endswith matched [\"winword.exe\",\"excel.exe\",\"powerpnt.exe\",\"outlook.exe\"]",
+        "process_name|endswith matched [\"powershell.exe\",\"pwsh.exe\",\"cmd.exe\",\"mshta.exe\",\"rundll32.exe\",\"wscript.ex..."
+      ]
+    },
+    {
+      "id": "office-attributes-on-wrong-event-type",
+      "event": {
+        "event_id": "vector-office-wrong-type",
+        "event_type": "file_write",
+        "timestamp": "2026-08-22T12:03:00Z",
+        "actor": "user@example.com",
+        "attributes": { "parent_process_name": "WINWORD.EXE", "process_name": "cmd.exe" }
+      },
+      "expected_rule_ids": [],
+      "expected_reasons": []
+    },
+    {
+      "id": "lsass-dump",
+      "event": {
+        "event_id": "vector-lsass",
+        "event_type": "process_start",
+        "timestamp": "2026-08-22T12:04:00Z",
+        "actor": "user@example.com",
+        "attributes": {
+          "process_name": "rundll32.exe",
+          "command_line": "rundll32 comsvcs.dll MiniDump 620 lsass.dmp"
+        }
+      },
+      "expected_rule_ids": ["CF-ENDPOINT-003"],
+      "expected_reasons": [
+        "event_type matched \"process_start\"",
+        "process_name|endswith matched [\"procdump.exe\",\"procdump64.exe\",\"rundll32.exe\"]",
+        "command_line|contains matched \"lsass\"",
+        "command_line|contains matched [\"minidump\",\" -ma \"]"
+      ]
+    },
+    {
+      "id": "lsass-attributes-on-wrong-event-type",
+      "event": {
+        "event_id": "vector-lsass-wrong-type",
+        "event_type": "file_write",
+        "timestamp": "2026-08-22T12:05:00Z",
+        "actor": "user@example.com",
+        "attributes": {
+          "process_name": "rundll32.exe",
+          "command_line": "rundll32 comsvcs.dll MiniDump 620 lsass.dmp"
+        }
+      },
+      "expected_rule_ids": [],
+      "expected_reasons": []
+    },
+    {
+      "id": "run-key-persistence",
+      "event": {
+        "event_id": "vector-run-key",
+        "event_type": "registry_value_set",
+        "timestamp": "2026-08-22T12:06:00Z",
+        "actor": "user@example.com",
+        "attributes": { "registry_path": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Updater" }
+      },
+      "expected_rule_ids": ["CF-ENDPOINT-004"],
+      "expected_reasons": [
+        "event_type matched \"registry_value_set\"",
+        "registry_path|contains matched [\"\\\\software\\\\microsoft\\\\windows\\\\currentversion\\\\run\\\\\",\"\\\\software\\\\microso..."
+      ]
+    },
+    {
+      "id": "sensitive-edge-path",
+      "event": {
+        "event_id": "vector-edge-path",
+        "event_type": "edge_http_request",
+        "timestamp": "2026-08-22T12:07:00Z",
+        "actor": "anonymous",
+        "source_ip": "198.51.100.44",
+        "attributes": { "request_path": "/.git/config" }
+      },
+      "expected_rule_ids": ["CF-EDGE-001"],
+      "expected_reasons": [
+        "event_type matched \"edge_http_request\"",
+        "request_path|contains matched [\"/.env\",\"/.git/config\",\"/server-status\",\"/actuator/env\",\"/wp-admin\"]"
+      ]
+    },
+    {
+      "id": "phishing-link",
+      "event": {
+        "event_id": "vector-phishing-link",
+        "event_type": "email_received",
+        "timestamp": "2026-08-22T12:08:00Z",
+        "actor": "sender@example.com",
+        "attributes": { "dmarc": "fail", "url_path": "/account/verify", "sender_domain": "example.com" }
+      },
+      "expected_rule_ids": ["CF-EMAIL-001"],
+      "expected_reasons": [
+        "event_type matched \"email_received\"",
+        "dmarc matched \"fail\"",
+        "url_path|contains matched [\"login\",\"verify\",\"password\"]"
+      ]
+    },
+    {
+      "id": "phishing-lookalike-domain",
+      "event": {
+        "event_id": "vector-phishing-domain",
+        "event_type": "email_received",
+        "timestamp": "2026-08-22T12:09:00Z",
+        "actor": "sender@example.com",
+        "attributes": { "dmarc": "fail", "url_path": "/newsletter", "sender_domain": "xn--paypa-4ve.example" }
+      },
+      "expected_rule_ids": ["CF-EMAIL-001"],
+      "expected_reasons": [
+        "event_type matched \"email_received\"",
+        "dmarc matched \"fail\"",
+        "sender_domain|re matched \"(xn--|[0-9]+\\\\.[0-9]+\\\\.[0-9]+\\\\.[0-9]+)\""
+      ]
+    },
+    {
+      "id": "authenticated-lookalike-domain",
+      "event": {
+        "event_id": "vector-phishing-auth-pass",
+        "event_type": "email_received",
+        "timestamp": "2026-08-22T12:10:00Z",
+        "actor": "sender@example.com",
+        "attributes": { "dmarc": "pass", "url_path": "/account/verify", "sender_domain": "xn--paypa-4ve.example" }
+      },
+      "expected_rule_ids": [],
+      "expected_reasons": []
+    },
+    {
+      "id": "unapproved-privilege-grant",
+      "event": {
+        "event_id": "vector-role-grant",
+        "event_type": "privileged_role_grant",
+        "timestamp": "2026-08-22T12:11:00Z",
+        "actor": "admin@example.com",
+        "attributes": { "role": "database-owner", "change_ticket": "none" }
+      },
+      "expected_rule_ids": ["CF-IDENTITY-002"],
+      "expected_reasons": [
+        "event_type matched \"privileged_role_grant\"",
+        "role matched [\"administrator\",\"security-admin\",\"database-owner\"]"
+      ]
+    },
+    {
+      "id": "approved-privilege-grant",
+      "event": {
+        "event_id": "vector-role-approved",
+        "event_type": "privileged_role_grant",
+        "timestamp": "2026-08-22T12:12:00Z",
+        "actor": "admin@example.com",
+        "attributes": { "role": "administrator", "change_ticket": "CHG-1234" }
+      },
+      "expected_rule_ids": [],
+      "expected_reasons": []
+    },
+    {
+      "id": "santa-denied-execution",
+      "event": {
+        "event_id": "vector-santa-deny",
+        "event_type": "santa_execution",
+        "timestamp": "2026-08-22T12:13:00Z",
+        "actor": "device:mac-1",
+        "attributes": { "decision": "DECISION_DENY" }
+      },
+      "expected_rule_ids": ["CF-MACOS-001"],
+      "expected_reasons": [
+        "event_type matched \"santa_execution\"",
+        "decision matched \"DECISION_DENY\""
+      ]
+    },
+    {
+      "id": "santa-allowed-execution",
+      "event": {
+        "event_id": "vector-santa-allow",
+        "event_type": "santa_execution",
+        "timestamp": "2026-08-22T12:14:00Z",
+        "actor": "device:mac-1",
+        "attributes": { "decision": "DECISION_ALLOW" }
+      },
+      "expected_rule_ids": [],
+      "expected_reasons": []
+    },
+    {
+      "id": "santa-gatekeeper-override",
+      "event": {
+        "event_id": "vector-gatekeeper",
+        "event_type": "santa_gatekeeper_override",
+        "timestamp": "2026-08-22T12:15:00Z",
+        "actor": "device:mac-1",
+        "attributes": {}
+      },
+      "expected_rule_ids": ["CF-MACOS-002"],
+      "expected_reasons": ["event_type matched \"santa_gatekeeper_override\""]
+    },
+    {
+      "id": "santa-xprotect",
+      "event": {
+        "event_id": "vector-xprotect",
+        "event_type": "santa_xprotect",
+        "timestamp": "2026-08-22T12:16:00Z",
+        "actor": "device:mac-1",
+        "attributes": { "xprotect_event": "detected", "malware_identifier": "OSX.Test" }
+      },
+      "expected_rule_ids": ["CF-MACOS-003"],
+      "expected_reasons": ["event_type matched \"santa_xprotect\""]
+    }
+  ]
+}

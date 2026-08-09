@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://controlforge.dev/contracts/detections/builtin-detection.v1.schema.json",
+  "title": "ControlForge Built-in Detection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "rule_id",
+    "rule_version",
+    "rule_digest",
+    "event_type",
+    "attribute",
+    "outcomes",
+    "tags"
+  ],
+  "properties": {
+    "rule_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "rule_version": { "type": "integer", "minimum": 1 },
+    "rule_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "event_type": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "attribute": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "outcomes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["value", "title", "severity"],
+        "properties": {
+          "value": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "severity": { "enum": ["informational", "low", "medium", "high", "critical"] }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    }
+  }
+}

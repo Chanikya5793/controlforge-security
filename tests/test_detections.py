@@ -104,6 +104,7 @@ def test_phishing_rule_matches_failed_auth_with_link_or_lookalike_domain(
 def test_parenthesized_condition_rejects_unclosed_group(base_event) -> None:  # type: ignore[no-untyped-def]
     rule = SigmaRule(
         id="TEST-PAREN",
+        rule_version=1,
         title="Test malformed parentheses",
         detection={
             "selection_a": {"event_type": "authentication_failure"},
@@ -119,6 +120,7 @@ def test_parenthesized_condition_rejects_unclosed_group(base_event) -> None:  # 
 def test_cidr_modifier_matches_source_ip(base_event) -> None:  # type: ignore[no-untyped-def]
     rule = SigmaRule(
         id="TEST-CIDR",
+        rule_version=1,
         title="Test CIDR",
         detection={"selection": {"source_ip|cidr": "203.0.113.0/24"}, "condition": "selection"},
     )
@@ -128,6 +130,7 @@ def test_cidr_modifier_matches_source_ip(base_event) -> None:  # type: ignore[no
 def test_one_of_condition_matches(base_event) -> None:  # type: ignore[no-untyped-def]
     rule = SigmaRule(
         id="TEST-ONE",
+        rule_version=1,
         title="Test one of",
         detection={
             "selection_a": {"event_type": "authentication_failure"},
@@ -141,6 +144,7 @@ def test_one_of_condition_matches(base_event) -> None:  # type: ignore[no-untype
 def test_unsupported_modifier_is_rejected(base_event) -> None:  # type: ignore[no-untyped-def]
     rule = SigmaRule(
         id="TEST-BAD",
+        rule_version=1,
         title="Bad modifier",
         detection={"selection": {"actor|unknown": "x"}, "condition": "selection"},
     )

@@ -1,0 +1,63 @@
+{
+  "contract_version": "1.0",
+  "vectors": [
+    {
+      "id": "bulk-sensitive-access-count",
+      "prior_events": [
+        {"event_id":"bulk-0","event_type":"sensitive_data_access","timestamp":"2026-08-18T06:00:00Z","actor":"contractor@example.com","attributes":{"bytes":1000}},
+        {"event_id":"bulk-1","event_type":"sensitive_data_access","timestamp":"2026-08-18T06:01:00Z","actor":"contractor@example.com","attributes":{"bytes":1000}},
+        {"event_id":"bulk-2","event_type":"sensitive_data_access","timestamp":"2026-08-18T06:02:00Z","actor":"contractor@example.com","attributes":{"bytes":1000}},
+        {"event_id":"bulk-3","event_type":"sensitive_data_access","timestamp":"2026-08-18T06:03:00Z","actor":"contractor@example.com","attributes":{"bytes":1000}},
+        {"event_id":"bulk-4","event_type":"sensitive_data_access","timestamp":"2026-08-18T06:04:00Z","actor":"contractor@example.com","attributes":{"bytes":1000}},
+        {"event_id":"bulk-5","event_type":"sensitive_data_access","timestamp":"2026-08-18T06:05:00Z","actor":"contractor@example.com","attributes":{"bytes":1000}},
+        {"event_id":"bulk-6","event_type":"sensitive_data_access","timestamp":"2026-08-18T06:06:00Z","actor":"contractor@example.com","attributes":{"bytes":1000}},
+        {"event_id":"bulk-7","event_type":"sensitive_data_access","timestamp":"2026-08-18T06:07:00Z","actor":"contractor@example.com","attributes":{"bytes":1000}},
+        {"event_id":"bulk-8","event_type":"sensitive_data_access","timestamp":"2026-08-18T06:08:00Z","actor":"contractor@example.com","attributes":{"bytes":1000}}
+      ],
+      "event": {"event_id":"bulk-9","event_type":"sensitive_data_access","timestamp":"2026-08-18T06:09:00Z","actor":"contractor@example.com","attributes":{"bytes":1000}},
+      "expected": {"rule_id":"CF-INSIDER-001","rule_version":1,"rule_digest":"sha256:40ba0763bd69cbf351700f8506d7a3a97e897baabebb71334f929210f28a3a0d","title":"Unusual sensitive-data access volume","severity":"high","reasons":["10 access events within 15m","10000 bytes accessed"],"tags":["insider-risk","financial-data","behavioral-analytics"]}
+    },
+    {
+      "id": "impossible-travel",
+      "prior_events": [
+        {"event_id":"login-sfo","event_type":"authentication_success","timestamp":"2026-08-18T06:00:00Z","actor":"user@example.com","attributes":{"latitude":37.7749,"longitude":-122.4194}}
+      ],
+      "event": {"event_id":"login-nyc","event_type":"authentication_success","timestamp":"2026-08-18T06:30:00Z","actor":"user@example.com","attributes":{"latitude":40.7128,"longitude":-74.006}},
+      "expected": {"rule_id":"CF-IDENTITY-001","rule_version":1,"rule_digest":"sha256:f907a19cbd716019acbee6714d104a36c8f3b96e6c2f889e8c2de733d7165ff2","title":"Impossible-travel authentication","severity":"high","reasons":["calculated travel velocity 8258 km/h","distance 4129 km over 0.50h"],"tags":["identity","account-takeover","behavioral-analytics"]}
+    },
+    {
+      "id": "credential-stuffing",
+      "prior_events": [
+        {"event_id":"failure-0","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:00Z","actor":"account-0@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-1","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:01Z","actor":"account-1@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-2","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:02Z","actor":"account-2@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-3","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:03Z","actor":"account-3@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-4","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:04Z","actor":"account-4@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-5","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:05Z","actor":"account-5@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-6","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:06Z","actor":"account-6@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-7","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:07Z","actor":"account-7@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-8","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:08Z","actor":"account-8@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-9","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:09Z","actor":"account-9@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-10","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:10Z","actor":"account-0@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-11","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:11Z","actor":"account-1@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-12","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:12Z","actor":"account-2@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-13","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:13Z","actor":"account-3@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-14","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:14Z","actor":"account-4@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-15","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:15Z","actor":"account-5@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-16","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:16Z","actor":"account-6@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-17","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:17Z","actor":"account-7@example.com","source_ip":"198.51.100.44","attributes":{}},
+        {"event_id":"failure-18","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:18Z","actor":"account-8@example.com","source_ip":"198.51.100.44","attributes":{}}
+      ],
+      "event": {"event_id":"failure-19","event_type":"edge_auth_failure","timestamp":"2026-08-18T06:00:19Z","actor":"account-9@example.com","source_ip":"198.51.100.44","attributes":{}},
+      "expected": {"rule_id":"CF-EDGE-002","rule_version":1,"rule_digest":"sha256:655bac8f0bc448c76feaf9c910b47460635703f6b614184b8ac07808385aaebc","title":"Credential-stuffing pattern at the authentication edge","severity":"high","reasons":["20 failed authentications from 198.51.100.44","10 distinct accounts within 5m"],"tags":["edge-security","credential-access","account-takeover","attack.t1110"]}
+    },
+    {
+      "id": "session-replay",
+      "prior_events": [
+        {"event_id":"session-one","event_type":"edge_session_use","timestamp":"2026-08-18T06:00:00Z","actor":"user@example.com","source_ip":"198.51.100.10","attributes":{"session_id_hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}
+      ],
+      "event": {"event_id":"session-two","event_type":"edge_session_use","timestamp":"2026-08-18T06:02:00Z","actor":"user@example.com","source_ip":"203.0.113.20","attributes":{"session_id_hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+      "expected": {"rule_id":"CF-EDGE-003","rule_version":1,"rule_digest":"sha256:221278c0c957c8141136788fb790f6086779fbb260bfdbefc6a6c990af148633","title":"Possible session replay across source addresses","severity":"high","reasons":["session hash reused from 198.51.100.10 and 203.0.113.20","reuse occurred within 10m"],"tags":["edge-security","session-hijacking","account-takeover"]}
+    }
+  ]
+}

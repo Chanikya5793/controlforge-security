@@ -1,4 +1,5 @@
 id: CF-MACOS-003
+rule_version: 1
 title: XProtect malware event observed by Santa
 description: Detects an XProtect malware detection or remediation event reported by Santa.
 status: stable

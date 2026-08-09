@@ -1,0 +1,424 @@
+{
+  "contract_version": "1.0",
+  "rules": [
+    {
+      "id": "CF-EDGE-001",
+      "rule_version": 1,
+      "title": "Sensitive path discovery at the application edge",
+      "description": "Detects requests for commonly exposed secrets, source-control metadata, and admin paths.",
+      "status": "experimental",
+      "logsource": {
+        "category": "webserver"
+      },
+      "detection": {
+        "selection_event": {
+          "event_type": "edge_http_request"
+        },
+        "selection_path": {
+          "request_path|contains": [
+            "/.env",
+            "/.git/config",
+            "/server-status",
+            "/actuator/env",
+            "/wp-admin"
+          ]
+        },
+        "condition": "selection_event and selection_path"
+      },
+      "level": "medium",
+      "tags": [
+        "edge-security",
+        "attack.discovery",
+        "attack.t1083"
+      ],
+      "rule_digest": "sha256:de9bb8dac72e6830a8821f24071fc9fc0ed286bb04a8691133df1c66ad2329a2"
+    },
+    {
+      "id": "CF-EMAIL-001",
+      "rule_version": 1,
+      "title": "High-confidence phishing email indicators",
+      "description": "Detects failed authentication paired with credential-themed links or lookalike domains.",
+      "status": "experimental",
+      "logsource": {
+        "category": "email"
+      },
+      "detection": {
+        "selection_auth": {
+          "event_type": "email_received",
+          "dmarc": "fail"
+        },
+        "selection_link": {
+          "url_path|contains": [
+            "login",
+            "verify",
+            "password"
+          ]
+        },
+        "selection_domain": {
+          "sender_domain|re": "(xn--|[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)"
+        },
+        "condition": "selection_auth and (selection_link or selection_domain)"
+      },
+      "level": "high",
+      "tags": [
+        "phishing",
+        "email-security",
+        "social-engineering"
+      ],
+      "rule_digest": "sha256:48d639e3c9676021b6b207cc020e4452eba7d1cf49ede4b7137df3c437f75081"
+    },
+    {
+      "id": "CF-ENDPOINT-001",
+      "rule_version": 1,
+      "title": "Encoded PowerShell execution",
+      "description": "Detects PowerShell process events containing encoded command arguments.",
+      "status": "experimental",
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection_process": {
+          "event_type": "process_start",
+          "process_name|endswith": [
+            "powershell.exe",
+            "pwsh.exe"
+          ]
+        },
+        "selection_flags": {
+          "command_line|contains": [
+            " -enc ",
+            " -encodedcommand "
+          ]
+        },
+        "condition": "selection_process and selection_flags"
+      },
+      "level": "high",
+      "tags": [
+        "attack.execution",
+        "attack.t1059.001",
+        "endpoint-security"
+      ],
+      "rule_digest": "sha256:da89a84a565d609c67793ed643e9a8d94e5a72cca59a95d8630ea4ab5591fc09"
+    },
+    {
+      "id": "CF-ENDPOINT-002",
+      "rule_version": 1,
+      "title": "Office application spawned a script or living-off-the-land binary",
+      "description": "Detects document applications launching shells and common proxy-execution utilities.",
+      "status": "experimental",
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection_event": {
+          "event_type": "process_start"
+        },
+        "selection_parent": {
+          "parent_process_name|endswith": [
+            "winword.exe",
+            "excel.exe",
+            "powerpnt.exe",
+            "outlook.exe"
+          ]
+        },
+        "selection_child": {
+          "process_name|endswith": [
+            "powershell.exe",
+            "pwsh.exe",
+            "cmd.exe",
+            "mshta.exe",
+            "rundll32.exe",
+            "wscript.exe",
+            "cscript.exe"
+          ]
+        },
+        "condition": "selection_event and selection_parent and selection_child"
+      },
+      "level": "high",
+      "tags": [
+        "attack.execution",
+        "attack.t1204.002",
+        "endpoint-security"
+      ],
+      "rule_digest": "sha256:e92f73f7ac92ee58832d3f90111e9066caf485dab0a725f2d04e0e904e50095c"
+    },
+    {
+      "id": "CF-ENDPOINT-003",
+      "rule_version": 1,
+      "title": "Suspected LSASS credential dumping",
+      "description": "Detects common process and command-line patterns used to dump LSASS memory.",
+      "status": "experimental",
+      "logsource": {
+        "category": "process_creation",
+        "product": "windows"
+      },
+      "detection": {
+        "selection_event": {
+          "event_type": "process_start"
+        },
+        "selection_process": {
+          "process_name|endswith": [
+            "procdump.exe",
+            "procdump64.exe",
+            "rundll32.exe"
+          ]
+        },
+        "selection_target": {
+          "command_line|contains": "lsass"
+        },
+        "selection_dump": {
+          "command_line|contains": [
+            "minidump",
+            " -ma "
+          ]
+        },
+        "condition": "selection_event and selection_process and selection_target and selection_dump"
+      },
+      "level": "critical",
+      "tags": [
+        "attack.credential-access",
+        "attack.t1003.001",
+        "endpoint-security"
+      ],
+      "rule_digest": "sha256:fa12b890c14838458d748b7a1bb9f75e45eb14c671ff3d6fcb82611f200a42af"
+    },
+    {
+      "id": "CF-ENDPOINT-004",
+      "rule_version": 1,
+      "title": "User-level Run key persistence",
+      "description": "Detects writes to Windows Run and RunOnce registry locations.",
+      "status": "experimental",
+      "logsource": {
+        "category": "registry_set",
+        "product": "windows"
+      },
+      "detection": {
+        "selection_event": {
+          "event_type": "registry_value_set"
+        },
+        "selection_path": {
+          "registry_path|contains": [
+            "\\software\\microsoft\\windows\\currentversion\\run\\",
+            "\\software\\microsoft\\windows\\currentversion\\runonce\\"
+          ]
+        },
+        "condition": "selection_event and selection_path"
+      },
+      "level": "medium",
+      "tags": [
+        "attack.persistence",
+        "attack.t1060",
+        "endpoint-security"
+      ],
+      "rule_digest": "sha256:a57cc61c259e45d100a0defd6e376df352db2da8e164e058a12a6459ad47a612"
+    },
+    {
+      "id": "CF-IDENTITY-002",
+      "rule_version": 1,
+      "title": "Privileged role granted outside approved workflow",
+      "description": "Detects high-impact role grants without an approved change reference.",
+      "status": "experimental",
+      "logsource": {
+        "category": "iam"
+      },
+      "detection": {
+        "selection": {
+          "event_type": "privileged_role_grant",
+          "role": [
+            "administrator",
+            "security-admin",
+            "database-owner"
+          ]
+        },
+        "approved_change": {
+          "change_ticket|startswith": "CHG-"
+        },
+        "condition": "selection and not approved_change"
+      },
+      "level": "critical",
+      "tags": [
+        "identity",
+        "privilege-escalation",
+        "insider-risk"
+      ],
+      "rule_digest": "sha256:d65bdf6b206a6d97a3d1a0e4ab6c6276ca0c56d9e3ce0a365df27ada17049263"
+    },
+    {
+      "id": "CF-MACOS-001",
+      "rule_version": 1,
+      "title": "Santa denied executable launch",
+      "description": "Detects an execution denied by the Santa endpoint security system extension.",
+      "status": "stable",
+      "logsource": {
+        "category": "process_creation",
+        "product": "macos"
+      },
+      "detection": {
+        "selection": {
+          "event_type": "santa_execution",
+          "decision": "DECISION_DENY"
+        },
+        "condition": "selection"
+      },
+      "level": "high",
+      "tags": [
+        "attack.execution",
+        "endpoint-security",
+        "north-pole-security-santa"
+      ],
+      "rule_digest": "sha256:3adec5159e9ebf10a512e890bd68b409266c5536802c390b994bc20b381e47a1"
+    },
+    {
+      "id": "CF-MACOS-002",
+      "rule_version": 1,
+      "title": "macOS Gatekeeper policy override",
+      "description": "Detects a user or process overriding Gatekeeper policy for a file.",
+      "status": "stable",
+      "logsource": {
+        "category": "endpoint",
+        "product": "macos"
+      },
+      "detection": {
+        "selection": {
+          "event_type": "santa_gatekeeper_override"
+        },
+        "condition": "selection"
+      },
+      "level": "high",
+      "tags": [
+        "attack.defense-evasion",
+        "attack.t1553.001",
+        "endpoint-security",
+        "north-pole-security-santa"
+      ],
+      "rule_digest": "sha256:6cdf50acadee39bfeca5f86ad779e2e280c1d18c6a8dd033f7c11cc7dbc3b33a"
+    },
+    {
+      "id": "CF-MACOS-003",
+      "rule_version": 1,
+      "title": "XProtect malware event observed by Santa",
+      "description": "Detects an XProtect malware detection or remediation event reported by Santa.",
+      "status": "stable",
+      "logsource": {
+        "category": "antivirus",
+        "product": "macos"
+      },
+      "detection": {
+        "selection": {
+          "event_type": "santa_xprotect"
+        },
+        "condition": "selection"
+      },
+      "level": "critical",
+      "tags": [
+        "malware",
+        "endpoint-security",
+        "north-pole-security-santa"
+      ],
+      "rule_digest": "sha256:0eaa8874be63e2c4bd65e43d7994eeebcd8fde849710af86e2dcf0d2f07b3b6d"
+    }
+  ],
+  "builtins": [
+    {
+      "rule_id": "CF-CONTROL-001",
+      "rule_version": 1,
+      "event_type": "endpoint_control_status",
+      "attribute": "status",
+      "outcomes": [
+        {
+          "value": "failed",
+          "title": "Required endpoint security control failed",
+          "severity": "high"
+        },
+        {
+          "value": "degraded",
+          "title": "Endpoint security control degraded",
+          "severity": "medium"
+        }
+      ],
+      "tags": [
+        "control-assurance",
+        "endpoint-security",
+        "defense-evasion"
+      ],
+      "rule_digest": "sha256:b2867c4afc9c35574b71b38b78f7d6ede62724d0a4810fa089b719c3657909fa"
+    }
+  ],
+  "correlations": [
+    {
+      "rule_id": "CF-INSIDER-001",
+      "rule_version": 1,
+      "title": "Unusual sensitive-data access volume",
+      "severity": "high",
+      "tags": [
+        "insider-risk",
+        "financial-data",
+        "behavioral-analytics"
+      ],
+      "event_type": "sensitive_data_access",
+      "window_minutes": 15,
+      "event_threshold": 10,
+      "distinct_threshold": null,
+      "byte_threshold": 50000000,
+      "maximum_speed_kph": null,
+      "rule_digest": "sha256:40ba0763bd69cbf351700f8506d7a3a97e897baabebb71334f929210f28a3a0d"
+    },
+    {
+      "rule_id": "CF-IDENTITY-001",
+      "rule_version": 1,
+      "title": "Impossible-travel authentication",
+      "severity": "high",
+      "tags": [
+        "identity",
+        "account-takeover",
+        "behavioral-analytics"
+      ],
+      "event_type": "authentication_success",
+      "window_minutes": null,
+      "event_threshold": null,
+      "distinct_threshold": null,
+      "byte_threshold": null,
+      "maximum_speed_kph": 900.0,
+      "rule_digest": "sha256:f907a19cbd716019acbee6714d104a36c8f3b96e6c2f889e8c2de733d7165ff2"
+    },
+    {
+      "rule_id": "CF-EDGE-002",
+      "rule_version": 1,
+      "title": "Credential-stuffing pattern at the authentication edge",
+      "severity": "high",
+      "tags": [
+        "edge-security",
+        "credential-access",
+        "account-takeover",
+        "attack.t1110"
+      ],
+      "event_type": "edge_auth_failure",
+      "window_minutes": 5,
+      "event_threshold": 20,
+      "distinct_threshold": 10,
+      "byte_threshold": null,
+      "maximum_speed_kph": null,
+      "rule_digest": "sha256:655bac8f0bc448c76feaf9c910b47460635703f6b614184b8ac07808385aaebc"
+    },
+    {
+      "rule_id": "CF-EDGE-003",
+      "rule_version": 1,
+      "title": "Possible session replay across source addresses",
+      "severity": "high",
+      "tags": [
+        "edge-security",
+        "session-hijacking",
+        "account-takeover"
+      ],
+      "event_type": "edge_session_use",
+      "window_minutes": 10,
+      "event_threshold": null,
+      "distinct_threshold": null,
+      "byte_threshold": null,
+      "maximum_speed_kph": null,
+      "rule_digest": "sha256:221278c0c957c8141136788fb790f6086779fbb260bfdbefc6a6c990af148633"
+    }
+  ]
+}

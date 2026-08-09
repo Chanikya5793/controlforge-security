@@ -12,6 +12,7 @@ def test_service_persists_alert_and_deduplicates(tmp_path) -> None:  # type: ign
     store = AuditStore(tmp_path / "audit.db")
     rule = SigmaRule(
         id="TEST-001",
+        rule_version=1,
         title="Authentication failure",
         detection={"selection": {"event_type": "authentication_failure"}, "condition": "selection"},
     )

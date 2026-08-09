@@ -1,4 +1,5 @@
 id: CF-IDENTITY-002
+rule_version: 1
 title: Privileged role granted outside approved workflow
 description: Detects high-impact role grants without an approved change reference.
 status: experimental

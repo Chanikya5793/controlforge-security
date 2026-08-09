@@ -1,4 +1,5 @@
 id: CF-ENDPOINT-001
+rule_version: 1
 title: Encoded PowerShell execution
 description: Detects PowerShell process events containing encoded command arguments.
 status: experimental
@@ -20,3 +21,4 @@ level: high
 tags:
   - attack.execution
   - attack.t1059.001
+  - endpoint-security

@@ -1,4 +1,5 @@
 id: CF-MACOS-001
+rule_version: 1
 title: Santa denied executable launch
 description: Detects an execution denied by the Santa endpoint security system extension.
 status: stable

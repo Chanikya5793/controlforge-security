@@ -1,4 +1,5 @@
 id: CF-EMAIL-001
+rule_version: 1
 title: High-confidence phishing email indicators
 description: Detects failed authentication paired with credential-themed links or lookalike domains.
 status: experimental

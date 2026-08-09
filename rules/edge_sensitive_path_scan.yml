@@ -1,4 +1,5 @@
 id: CF-EDGE-001
+rule_version: 1
 title: Sensitive path discovery at the application edge
 description: Detects requests for commonly exposed secrets, source-control metadata, and admin paths.
 status: experimental

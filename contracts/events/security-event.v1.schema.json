@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://controlforge.dev/contracts/events/security-event.v1.schema.json",
+  "title": "ControlForge Security Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "timestamp", "actor", "attributes"],
+  "properties": {
+    "event_id": { "$ref": "#/$defs/identifier" },
+    "event_type": { "$ref": "#/$defs/identifier" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "actor": { "type": "string", "minLength": 1, "maxLength": 320 },
+    "source_ip": { "type": "string", "minLength": 2, "maxLength": 45 },
+    "target": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "device_id": { "$ref": "#/$defs/identifier" },
+    "attributes": {
+      "type": "object",
+      "propertyNames": { "type": "string", "maxLength": 128 },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    }
+  }
+}

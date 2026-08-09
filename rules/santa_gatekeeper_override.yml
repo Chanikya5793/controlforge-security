@@ -1,4 +1,5 @@
 id: CF-MACOS-002
+rule_version: 1
 title: macOS Gatekeeper policy override
 description: Detects a user or process overriding Gatekeeper policy for a file.
 status: stable
