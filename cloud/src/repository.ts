@@ -8,6 +8,9 @@ import type {
 } from "./types";
 import type { SecurityEventInput } from "./schemas";
 
+const EVENT_IDS_PER_QUEUE_MESSAGE = 50;
+const QUEUE_MESSAGES_PER_SEND = 25;
+
 function canonicalize(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
@@ -105,14 +108,29 @@ export async function persistEvents(
     pendingDuplicates.push(...pending.results.map(({ event_id: eventId }) => eventId));
   }
 
-  const queueEventIds = [...accepted, ...pendingDuplicates];
-  for (let offset = 0; offset < queueEventIds.length; offset += 100) {
-    await env.EVENT_QUEUE.sendBatch(queueEventIds.slice(offset, offset + 100).map((eventId) => ({
-      body: { tenantId, eventId, attemptId: crypto.randomUUID() },
-      contentType: "json",
-    })));
-  }
+  await enqueueEventIds(env, tenantId, [...accepted, ...pendingDuplicates]);
   return { accepted, duplicates };
+}
+
+export async function enqueueEventIds(
+  env: Env,
+  tenantId: string,
+  eventIds: string[],
+): Promise<void> {
+  const messages = [];
+  for (let offset = 0; offset < eventIds.length; offset += EVENT_IDS_PER_QUEUE_MESSAGE) {
+    messages.push({
+      body: {
+        tenantId,
+        eventIds: eventIds.slice(offset, offset + EVENT_IDS_PER_QUEUE_MESSAGE),
+        attemptId: crypto.randomUUID(),
+      },
+      contentType: "json",
+    } as const);
+  }
+  for (let offset = 0; offset < messages.length; offset += QUEUE_MESSAGES_PER_SEND) {
+    await env.EVENT_QUEUE.sendBatch(messages.slice(offset, offset + QUEUE_MESSAGES_PER_SEND));
+  }
 }
 
 export async function loadEvent(
@@ -136,30 +154,91 @@ export async function persistAlertAndCase(
   env: Env,
   tenantId: string,
   alert: DetectionAlert,
+  event: StoredEvent,
 ): Promise<void> {
-  const caseId = (await sha256Hex(`${tenantId}:case:${alert.alertId}`)).slice(0, 32);
+  const entity = event.device_id ? `device:${event.device_id}` : `actor:${alert.actor}`;
+  const semanticKey = await sha256Hex(
+    `${tenantId}:case-semantic:v1:${alert.ruleId}:${entity}`,
+  );
   const inserted = await env.DB.prepare(
     `INSERT OR IGNORE INTO alerts(
        tenant_id, alert_id, event_id, rule_id, title, severity, actor,
-       reasons_json, tags_json, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       reasons_json, tags_json, rule_version, rule_digest, rule_snapshot_json,
+       fingerprint_version, detector_version, evidence_json, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     tenantId, alert.alertId, alert.eventId, alert.ruleId, alert.title, alert.severity,
-    alert.actor, JSON.stringify(alert.reasons), JSON.stringify(alert.tags), alert.createdAt,
+    alert.actor,
+    JSON.stringify(alert.reasons),
+    JSON.stringify(alert.tags),
+    alert.ruleVersion,
+    alert.ruleDigest,
+    JSON.stringify(alert.ruleSnapshot),
+    alert.fingerprintVersion,
+    alert.detectorVersion,
+    JSON.stringify(alert.evidence),
+    alert.createdAt,
   ).run();
-  if (inserted.meta.changes !== 1) return;
+  const occurrence = await env.DB.prepare(
+    `SELECT alert_id FROM alerts
+      WHERE tenant_id = ? AND rule_id = ? AND event_id = ?`,
+  ).bind(tenantId, alert.ruleId, alert.eventId).first<{ alert_id: string }>();
+  if (!occurrence) {
+    throw new Error("semantic alert occurrence was not persisted");
+  }
+  const resolvedAlertId = occurrence.alert_id;
+  if (inserted.meta.changes !== 1 || resolvedAlertId !== alert.alertId) {
+    const existingLink = await env.DB.prepare(
+      "SELECT case_id FROM case_alerts WHERE tenant_id = ? AND alert_id = ? LIMIT 1",
+    ).bind(tenantId, resolvedAlertId).first<{ case_id: string }>();
+    if (existingLink) return;
+  }
 
   const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO cases(
+       tenant_id, case_id, semantic_key, title, priority, status, opened_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, 'open', ?, ?)`,
+  ).bind(
+    tenantId,
+    crypto.randomUUID(),
+    semanticKey,
+    alert.title,
+    casePriority(alert.severity),
+    now,
+    now,
+  ).run();
+  const activeCase = await env.DB.prepare(
+    `SELECT case_id FROM cases
+      WHERE tenant_id = ? AND semantic_key = ? AND status != 'closed'`,
+  ).bind(tenantId, semanticKey).first<{ case_id: string }>();
+  if (!activeCase) throw new Error("active semantic case was not persisted");
+  const caseId = activeCase.case_id;
   await env.DB.batch([
     env.DB.prepare(
-      `INSERT OR IGNORE INTO cases(
-         tenant_id, case_id, title, priority, status, opened_at, updated_at
-       ) VALUES (?, ?, ?, ?, 'open', ?, ?)`,
-    ).bind(tenantId, caseId, alert.title, casePriority(alert.severity), now, now),
+      `INSERT OR IGNORE INTO case_alerts(tenant_id, case_id, alert_id, linked_at)
+       VALUES (?, ?, ?, ?)`,
+    ).bind(tenantId, caseId, resolvedAlertId, now),
     env.DB.prepare(
-      "INSERT OR IGNORE INTO case_alerts(tenant_id, case_id, alert_id, linked_at) VALUES (?, ?, ?, ?)",
-    ).bind(tenantId, caseId, alert.alertId, now),
+      `UPDATE cases
+          SET updated_at = ?,
+              priority = CASE
+                WHEN priority = 'critical' OR ? = 'critical' THEN 'critical'
+                WHEN priority = 'high' OR ? = 'high' THEN 'high'
+                WHEN priority = 'medium' OR ? = 'medium' THEN 'medium'
+                ELSE 'low'
+              END
+        WHERE tenant_id = ? AND case_id = ?`,
+    ).bind(
+      now,
+      casePriority(alert.severity),
+      casePriority(alert.severity),
+      casePriority(alert.severity),
+      tenantId,
+      caseId,
+    ),
   ]);
+  if (inserted.meta.changes !== 1 || resolvedAlertId !== alert.alertId) return;
   await appendAudit(
     env,
     tenantId,
@@ -167,7 +246,14 @@ export async function persistAlertAndCase(
     { id: "detector", type: "collector", tenantId },
     "alert",
     alert.alertId,
-    { rule_id: alert.ruleId, severity: alert.severity, case_id: caseId },
+    {
+      rule_id: alert.ruleId,
+      rule_version: alert.ruleVersion,
+      rule_digest: alert.ruleDigest,
+      fingerprint_version: alert.fingerprintVersion,
+      severity: alert.severity,
+      case_id: caseId,
+    },
   );
 }
 
@@ -182,6 +268,18 @@ export async function markEventProcessed(
   ).bind(error ? null : new Date().toISOString(), error ?? null, tenantId, eventId).run();
 }
 
+export async function markEventsProcessed(
+  db: D1Database,
+  events: Array<{ tenant_id: string; event_id: string }>,
+): Promise<void> {
+  const processedAt = new Date().toISOString();
+  for (let offset = 0; offset < events.length; offset += 100) {
+    await db.batch(events.slice(offset, offset + 100).map((event) => db.prepare(
+      "UPDATE events SET processed_at = ?, processing_error = NULL WHERE tenant_id = ? AND event_id = ?",
+    ).bind(processedAt, event.tenant_id, event.event_id)));
+  }
+}
+
 export function mapAlert(row: AlertRow): Record<string, unknown> {
   return {
     alert_id: row.alert_id,
@@ -192,6 +290,14 @@ export function mapAlert(row: AlertRow): Record<string, unknown> {
     actor: row.actor,
     reasons: JSON.parse(row.reasons_json) as unknown,
     tags: JSON.parse(row.tags_json) as unknown,
+    rule_version: row.rule_version,
+    rule_digest: row.rule_digest,
+    rule_snapshot: row.rule_snapshot_json === null
+      ? null
+      : JSON.parse(row.rule_snapshot_json) as unknown,
+    fingerprint_version: row.fingerprint_version,
+    detector_version: row.detector_version,
+    evidence: JSON.parse(row.evidence_json) as unknown,
     created_at: row.created_at,
   };
 }

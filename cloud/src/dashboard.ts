@@ -4,70 +4,221 @@ export const dashboardHtml = `<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>ControlForge SOC</title>
+  <title>ControlForge Security Operations</title>
   <style nonce="__CSP_NONCE__">
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background:#071018; color:#e8f1f5; }
+    :root { color-scheme:dark; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:#071015; color:#eef4f6; --canvas:#071015; --rail:#09151b; --surface:#0d1b22; --surface-2:#11242c; --border:#27414a; --border-strong:#3b5c66; --text:#eef4f6; --muted:#a9bbc1; --subtle:#789098; --accent:#55dfba; --focus:#8be9ff; --critical:#ff8f98; --high:#ffb36b; --medium:#e8d36f; --low:#85c8e8; --ok:#63d39e; --danger-bg:#321a21; --radius:12px; --shadow:0 18px 50px rgba(0,0,0,.24); }
     * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; background:radial-gradient(circle at 80% -10%,#123e45 0,transparent 38%),#071018; }
-    header,main { width:min(1180px,calc(100% - 32px)); margin:auto; }
-    header { display:flex; align-items:center; justify-content:space-between; padding:28px 0 18px; }
-    h1 { margin:0; font-size:1.35rem; letter-spacing:.02em; } .mark { color:#52e1bd; }
-    .status { color:#98aab4; font-size:.86rem; }
-    .controls { display:flex; gap:12px; align-items:end; margin:24px 0; flex-wrap:wrap; }
-    label { display:grid; gap:6px; color:#9fb2bd; font-size:.8rem; }
-    input,button { border:1px solid #28414d; border-radius:9px; background:#0d1b24; color:#e8f1f5; padding:10px 12px; min-height:42px; }
-    input { min-width:280px; } button { cursor:pointer; background:#123b3b; border-color:#28645b; font-weight:700; }
-    button:hover { background:#18504c; }
-    .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
-    .card { padding:18px; border:1px solid #183440; border-radius:12px; background:rgba(11,25,34,.88); box-shadow:0 18px 60px rgba(0,0,0,.18); }
-    .metric { font-size:2rem; font-weight:750; margin-top:8px; } .label { color:#8fa4af; font-size:.82rem; }
-    section { margin:22px 0; } h2 { font-size:1rem; margin:0 0 12px; }
-    table { width:100%; border-collapse:collapse; font-size:.88rem; }
-    th,td { text-align:left; padding:11px 9px; border-bottom:1px solid #18323e; vertical-align:top; }
-    th { color:#8fa4af; font-weight:600; } .critical { color:#ff7b82; } .high { color:#ffb36a; } .medium { color:#f5d56b; }
-    .empty,.error { color:#91a5af; padding:18px 0; } .error { color:#ff969b; }
-    @media(max-width:760px){ .grid{grid-template-columns:repeat(2,1fr)} input{min-width:0;width:100%} .controls{display:grid} }
+    html { scroll-behavior:smooth; }
+    body { margin:0; min-height:100vh; background:var(--canvas); color:var(--text); }
+    button,input,select,textarea { font:inherit; min-height:44px; }
+    button { cursor:pointer; }
+    button:disabled { cursor:not-allowed; opacity:.5; }
+    a { color:inherit; }
+    :focus-visible { outline:3px solid var(--focus); outline-offset:3px; }
+    .skip { position:fixed; z-index:100; left:16px; top:-80px; padding:12px 16px; border-radius:8px; background:#fff; color:#071015; }
+    .skip:focus { top:16px; }
+    .shell { display:grid; grid-template-columns:232px minmax(0,1fr); min-height:100vh; }
+    .shell,.rail,.workspace,main,section,.split,.split>section,.card,.table-card { min-width:0; max-width:100%; }
+    .rail { position:sticky; top:0; width:100%; height:100vh; display:flex; flex-direction:column; padding:24px 16px; border-right:1px solid var(--border); background:linear-gradient(180deg,#0a171d,#081217); }
+    .brand { display:flex; gap:12px; align-items:center; padding:0 8px 24px; }
+    .brand-mark { display:grid; place-items:center; width:36px; height:36px; border:1px solid #438f7d; border-radius:10px; background:#123b34; color:var(--accent); font-weight:900; }
+    .brand strong { display:block; letter-spacing:.01em; }
+    .brand span,.eyebrow { color:var(--muted); font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; }
+    nav { display:grid; gap:4px; min-width:0; max-width:100%; }
+    nav a { display:flex; align-items:center; gap:10px; min-height:44px; padding:10px 12px; border-radius:9px; color:var(--muted); text-decoration:none; font-size:.9rem; font-weight:650; }
+    nav a:hover,nav a:focus-visible { background:var(--surface-2); color:var(--text); }
+    .nav-dot { width:7px; height:7px; border-radius:50%; background:var(--border-strong); }
+    nav a:first-child .nav-dot { background:var(--accent); box-shadow:0 0 0 4px rgba(85,223,186,.1); }
+    .rail-foot { margin-top:auto; padding:16px 8px 0; border-top:1px solid var(--border); }
+    .identity { margin-top:5px; overflow:hidden; text-overflow:ellipsis; font-size:.86rem; white-space:nowrap; }
+    .role { display:inline-flex; align-items:center; min-height:26px; margin-top:8px; padding:3px 8px; border:1px solid var(--border-strong); border-radius:999px; color:var(--muted); font-size:.72rem; text-transform:capitalize; }
+    .workspace { min-width:0; }
+    .topbar { position:sticky; z-index:20; top:0; display:flex; align-items:center; justify-content:space-between; gap:16px; min-width:0; max-width:100%; min-height:72px; padding:12px 28px; border-bottom:1px solid var(--border); background:rgba(7,16,21,.94); backdrop-filter:blur(14px); }
+    .connection { display:flex; align-items:center; gap:9px; color:var(--muted); font-size:.82rem; }
+    .connection::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--medium); }
+    .connection.connected::before { background:var(--ok); }
+    .context { display:flex; align-items:end; gap:8px; min-width:0; max-width:100%; }
+    .context label { min-width:0; }
+    label { display:grid; gap:5px; color:var(--muted); font-size:.75rem; font-weight:650; }
+    select,input,textarea { border:1px solid var(--border-strong); border-radius:9px; background:#0b1920; color:var(--text); padding:10px 12px; }
+    select { min-width:230px; }
+    .button { border:1px solid #479c87; border-radius:9px; background:#17473e; color:#effffb; padding:10px 14px; font-weight:760; }
+    .button:hover { background:#1d5a4e; }
+    .button.secondary { border-color:var(--border-strong); background:var(--surface-2); color:var(--text); }
+    .button.danger { border-color:#8e4b58; background:#431f28; }
+    main { width:min(1500px,100%); margin:auto; padding:32px 28px 64px; }
+    .hero { display:flex; align-items:end; justify-content:space-between; gap:24px; min-width:0; max-width:100%; margin-bottom:24px; }
+    .hero>* { min-width:0; max-width:100%; }
+    h1 { margin:5px 0 8px; font-size:clamp(1.7rem,3vw,2.45rem); letter-spacing:-.035em; }
+    .hero p { max-width:720px; margin:0; color:var(--muted); line-height:1.55; }
+    .stamp { color:var(--muted); font-size:.78rem; text-align:right; }
+    .notice { display:none; margin:0 0 16px; padding:13px 15px; border:1px solid #77434e; border-radius:10px; background:var(--danger-bg); color:#ffd6da; }
+    .notice.visible { display:block; }
+    .metric-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; }
+    .card { border:1px solid var(--border); border-radius:var(--radius); background:linear-gradient(160deg,rgba(17,36,44,.96),rgba(11,25,31,.96)); box-shadow:var(--shadow); }
+    .metric { min-height:126px; padding:17px; }
+    .metric-label { color:var(--muted); font-size:.77rem; font-weight:680; }
+    .metric-value { margin:12px 0 7px; font-size:2rem; font-weight:820; letter-spacing:-.04em; }
+    .metric-detail { color:var(--subtle); font-size:.75rem; line-height:1.35; }
+    .posture { color:var(--ok); }
+    .posture.degraded { color:var(--critical); }
+    .health-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); margin:12px 0 28px; overflow:hidden; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); }
+    .health-item { padding:14px 16px; border-right:1px solid var(--border); }
+    .health-item:last-child { border-right:0; }
+    .health-item strong { display:block; margin-top:5px; font-size:.93rem; }
+    section { scroll-margin-top:92px; margin:28px 0; }
+    .section-head { display:flex; align-items:end; justify-content:space-between; gap:20px; margin-bottom:12px; }
+    h2 { margin:0; font-size:1.1rem; letter-spacing:-.01em; }
+    .section-head p { margin:5px 0 0; color:var(--muted); font-size:.82rem; }
+    .count { color:var(--muted); font-size:.78rem; }
+    .filters { display:grid; grid-template-columns:minmax(220px,1.6fr) repeat(4,minmax(130px,.7fr)); gap:8px; margin:0 0 12px; }
+    .filters input,.filters select { width:100%; min-width:0; }
+    .table-card { overflow:hidden; }
+    .table-wrap { display:block; width:100%; max-width:100%; min-width:0; overflow-x:auto; overscroll-behavior-inline:contain; }
+    table { width:100%; min-width:850px; border-collapse:collapse; font-size:.83rem; }
+    caption { height:1px; width:1px; overflow:hidden; position:absolute; clip:rect(0 0 0 0); white-space:nowrap; }
+    th,td { padding:13px 15px; border-bottom:1px solid var(--border); text-align:left; vertical-align:middle; }
+    th { color:var(--subtle); background:rgba(7,16,21,.45); font-size:.7rem; letter-spacing:.07em; text-transform:uppercase; }
+    tbody tr:last-child td { border-bottom:0; }
+    tbody tr:hover { background:rgba(27,59,68,.28); }
+    .case-button { min-height:44px; padding:0; border:0; background:transparent; color:var(--text); text-align:left; font-weight:730; }
+    .case-button:hover { color:var(--accent); text-decoration:underline; }
+    .secondary-text { display:block; margin-top:4px; overflow-wrap:anywhere; color:var(--subtle); font-size:.72rem; font-weight:500; }
+    .chip { display:inline-flex; align-items:center; gap:6px; min-height:25px; padding:3px 8px; border:1px solid var(--border-strong); border-radius:999px; color:var(--muted); font-size:.69rem; font-weight:760; text-transform:capitalize; white-space:nowrap; }
+    .chip::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+    .critical { color:var(--critical); border-color:#72424a; background:#28161b; }
+    .high { color:var(--high); border-color:#75502d; background:#2a1e13; }
+    .medium { color:var(--medium); border-color:#6a6033; background:#262313; }
+    .low,.informational { color:var(--low); }
+    .open,.investigating,.proposed,.approved,.dispatched { color:var(--medium); }
+    .succeeded,.active { color:var(--ok); }
+    .failed,.rejected,.revoked,.expired { color:var(--critical); }
+    .time strong { display:block; color:var(--text); font-size:.78rem; font-weight:650; }
+    .time small { display:block; margin-top:3px; color:var(--subtle); font-size:.72rem; }
+    .empty,.loading,.error { padding:32px 20px; color:var(--muted); text-align:center; }
+    .error { color:var(--critical); }
+    .split { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(300px,.7fr); gap:12px; }
+    .panel { padding:18px; }
+    .approval-list { display:grid; gap:10px; }
+    .approval-item { padding:14px; border:1px solid var(--border); border-radius:10px; background:rgba(7,16,21,.34); }
+    .approval-item header { display:flex; justify-content:space-between; gap:12px; }
+    .approval-item p { margin:8px 0; color:var(--muted); font-size:.8rem; line-height:1.45; }
+    dialog { width:min(980px,calc(100% - 32px)); max-height:calc(100vh - 32px); padding:0; border:1px solid var(--border-strong); border-radius:14px; background:var(--surface); color:var(--text); box-shadow:0 32px 100px rgba(0,0,0,.65); }
+    dialog::backdrop { background:rgba(1,7,10,.78); backdrop-filter:blur(4px); }
+    .dialog-head { position:sticky; z-index:2; top:0; display:flex; justify-content:space-between; gap:16px; padding:18px 20px; border-bottom:1px solid var(--border); background:rgba(13,27,34,.97); }
+    .dialog-head h2 { margin-top:4px; }
+    .icon-button { width:44px; padding:0; border:1px solid var(--border-strong); border-radius:9px; background:var(--surface-2); color:var(--text); }
+    .detail-body { padding:20px; }
+    .detail-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:18px; }
+    .detail-stat { padding:12px; border:1px solid var(--border); border-radius:9px; background:var(--canvas); }
+    .detail-section { margin:20px 0 0; }
+    .timeline { display:grid; gap:10px; }
+    .timeline-item { min-width:0; padding:14px; overflow-wrap:anywhere; border-left:3px solid var(--border-strong); border-radius:0 9px 9px 0; background:rgba(7,16,21,.55); }
+    .timeline-item h3 { margin:0 0 7px; font-size:.91rem; }
+    .timeline-item p { color:var(--muted); }
+    .evidence { margin:8px 0 0; padding-left:20px; color:var(--muted); font-size:.79rem; line-height:1.55; }
+    .facts { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
+    .detail-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+    .detail-actions .button { min-height:38px; padding:7px 10px; font-size:.76rem; }
+    .decision { display:grid; gap:8px; margin-top:10px; }
+    .decision textarea { width:100%; min-height:72px; resize:vertical; }
+    .decision-buttons { display:flex; gap:8px; }
+    .workflow-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .workflow-form { display:grid; align-content:start; gap:10px; padding:14px; border:1px solid var(--border); border-radius:10px; background:rgba(7,16,21,.45); }
+    .workflow-form h3 { margin:0; font-size:.9rem; }
+    .workflow-form textarea { width:100%; min-height:84px; resize:vertical; }
+    [aria-busy="true"] { cursor:progress; }
+    @media(max-width:1100px) { .metric-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } .filters { grid-template-columns:repeat(2,minmax(0,1fr)); } .filters label:first-child { grid-column:1/-1; } .split { grid-template-columns:1fr; } }
+    @media(max-width:780px) { .shell { grid-template-columns:minmax(0,1fr); } .rail { position:static; width:100%; max-width:100%; height:auto; padding:14px 16px; overflow:hidden; border-right:0; border-bottom:1px solid var(--border); } .brand { padding:0 0 12px; } nav { display:flex; width:100%; overflow-x:auto; overscroll-behavior-inline:contain; } nav a { flex:0 0 auto; } .rail-foot { display:none; } .topbar { width:100%; padding:10px 16px; } .connection { display:none; } main { width:100%; padding:24px 16px 48px; } .hero { align-items:flex-start; } .stamp { display:none; } .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .health-strip { grid-template-columns:repeat(2,minmax(0,1fr)); } .health-item:nth-child(2) { border-right:0; } .health-item:nth-child(-n+2) { border-bottom:1px solid var(--border); } .detail-grid,.workflow-grid { grid-template-columns:minmax(0,1fr); } }
+    @media(max-width:480px) { .topbar { align-items:end; } .context { flex:1 1 100%; width:100%; } .context label { flex:1 1 auto; } .context .role { flex:0 0 auto; } select { min-width:0; width:100%; } .button-label { display:none; } .metric-grid,.filters,.health-strip { grid-template-columns:minmax(0,1fr); } .health-item { border-right:0; border-bottom:1px solid var(--border); } .section-head { align-items:flex-start; flex-direction:column; } }
+    @media(prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } }
   </style>
 </head>
 <body>
-  <header><h1><span class="mark">ControlForge</span> Autonomous SOC</h1><div class="status" id="status">Not connected</div></header>
-  <main>
-    <div class="controls">
-      <label>Tenant ID<input id="tenant" autocomplete="off" placeholder="tenant UUID"></label>
-      <button id="load">Load secure dashboard</button>
+  <a class="skip" href="#main">Skip to main content</a>
+  <div class="shell">
+    <aside class="rail" aria-label="Primary navigation">
+      <div class="brand"><div class="brand-mark" aria-hidden="true">CF</div><div><strong>ControlForge</strong><span>Evidence-first SOC</span></div></div>
+      <nav><a href="#overview"><span class="nav-dot"></span>Overview</a><a href="#cases"><span class="nav-dot"></span>Case queue</a><a href="#devices"><span class="nav-dot"></span>Endpoints</a><a href="#alerts"><span class="nav-dot"></span>Alert stream</a><a href="#governance"><span class="nav-dot"></span>Governance</a></nav>
+      <div class="rail-foot"><div class="eyebrow">Signed in as</div><div class="identity" id="identity">Authenticating</div><div class="role" id="role">No role</div></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar"><div class="connection" id="status" role="status" aria-live="polite">Authenticating</div><div class="context"><span class="role" id="top-role">No role</span><label>Organization<select id="tenant" disabled><option>Loading memberships...</option></select></label><button class="button secondary" id="refresh" type="button" disabled><span aria-hidden="true">↻</span> <span class="button-label">Refresh</span></button></div></header>
+      <main id="main" tabindex="-1" aria-busy="true">
+        <section id="overview">
+          <div class="hero"><div><div class="eyebrow">Security operations command center</div><h1>Know what needs attention now.</h1><p>Deterministic detections, preserved evidence, human-governed response, and operational health in one tenant-aware workspace.</p></div><div class="stamp" id="updated">Awaiting first refresh</div></div>
+          <div class="notice" id="notice" role="alert"></div>
+          <div class="metric-grid" id="metrics" aria-label="Security posture metrics"><div class="card loading">Loading posture.</div></div>
+          <div class="health-strip" id="health" aria-label="Ingestion and endpoint health"></div>
+        </section>
+        <section id="cases">
+          <div class="section-head"><div><h2>Prioritized case queue</h2><p>Recurring detections are grouped by rule and affected endpoint or actor.</p></div><div class="count" id="case-count">Loading</div></div>
+          <form class="filters" id="case-filters"><label>Search<input id="case-search" type="search" placeholder="Detection, actor, endpoint, rule, or tag"></label><label>Severity<select id="severity-filter"><option value="">All severities</option><option>critical</option><option>high</option><option>medium</option><option>low</option></select></label><label>Status<select id="status-filter"><option value="">All statuses</option><option>open</option><option>investigating</option><option>contained</option></select></label><label>Source<select id="source-filter"><option value="">All sources</option></select></label><label>Last activity<select id="time-filter"><option value="">Any time</option><option value="1">Past hour</option><option value="24">Past 24 hours</option><option value="168">Past 7 days</option></select></label></form>
+          <div class="card table-card" id="case-queue"><div class="loading">Loading prioritized cases.</div></div>
+        </section>
+        <div class="split">
+          <section id="devices"><div class="section-head"><div><h2>Endpoint health</h2><p>Enrollment, agent version, and telemetry freshness.</p></div></div><div class="card table-card" id="device-list"><div class="loading">Loading endpoints.</div></div></section>
+          <section id="governance"><div class="section-head"><div><h2>Approval queue</h2><p>Human review for bounded response actions.</p></div></div><div class="card panel approval-list" id="approval-list"><div class="loading">Loading actions.</div></div></section>
+        </div>
+        <section id="alerts"><div class="section-head"><div><h2>Recent deterministic alerts</h2><p>Newest decisions from the Cloud detector.</p></div></div><div class="card table-card" id="alert-list"><div class="loading">Loading alerts.</div></div></section>
+      </main>
     </div>
-    <div class="grid" id="metrics"></div>
-    <section class="card"><h2>Open cases</h2><div id="cases" class="empty">Choose a tenant to load cases.</div></section>
-    <section class="card"><h2>Recent alerts</h2><div id="alerts" class="empty">Choose a tenant to load alerts.</div></section>
-  </main>
+  </div>
+  <dialog id="case-detail" aria-labelledby="detail-title"><div class="dialog-head"><div><div class="eyebrow">Case evidence</div><h2 id="detail-title">Case detail</h2></div><button class="icon-button" id="close-detail" type="button" aria-label="Close case detail">×</button></div><div class="detail-body" id="detail-body"><div class="loading">Loading case evidence.</div></div></dialog>
   <script type="module" nonce="__CSP_NONCE__">
-    const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
-    const request = async (path, tenant) => {
-      const response = await fetch(path, {headers:{'x-controlforge-tenant-id':tenant}});
-      if (!response.ok) throw new Error('Request failed with HTTP ' + response.status);
-      return response.json();
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+    const byId = (id) => document.getElementById(id);
+    const state = { memberships:[], tenant:'', role:'viewer', principal:null, summary:null, devices:[], groups:[], alerts:[], actions:[], assignees:[], selected:null };
+    const status = byId('status'); const main = byId('main'); const tenantSelect = byId('tenant'); const refreshButton = byId('refresh'); const detailDialog = byId('case-detail');
+    const setRole = (role) => { byId('role').textContent=role; byId('top-role').textContent=role; };
+    const titleCase = (value) => String(value ?? '').replaceAll('_',' ').split(' ').map((word) => word ? word[0].toUpperCase()+word.slice(1) : '').join(' ');
+    const absoluteTime = (value) => { const date = new Date(value); return Number.isNaN(date.valueOf()) ? 'Unknown time' : new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(date); };
+    const relativeTime = (value) => { const date = new Date(value); if (Number.isNaN(date.valueOf())) return 'Unknown'; const seconds = Math.round((date.valueOf()-Date.now())/1000); const absolute = Math.abs(seconds); const units = absolute < 60 ? ['second',seconds] : absolute < 3600 ? ['minute',Math.round(seconds/60)] : absolute < 86400 ? ['hour',Math.round(seconds/3600)] : ['day',Math.round(seconds/86400)]; return new Intl.RelativeTimeFormat(undefined,{numeric:'auto'}).format(units[1],units[0]); };
+    const timeHtml = (value) => value ? '<time class="time" datetime="'+escapeHtml(value)+'" title="'+escapeHtml(absoluteTime(value))+'"><strong>'+escapeHtml(relativeTime(value))+'</strong><small>'+escapeHtml(absoluteTime(value))+'</small></time>' : '<span class="secondary-text">No telemetry yet</span>';
+    const chip = (value) => '<span class="chip '+escapeHtml(String(value ?? '').toLowerCase())+'">'+escapeHtml(titleCase(value))+'</span>';
+    const table = (caption,headings,rows) => '<div class="table-wrap"><table><caption>'+escapeHtml(caption)+'</caption><thead><tr>'+headings.map((heading) => '<th scope="col">'+escapeHtml(heading)+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';
+    const setBusy = (busy) => { main.setAttribute('aria-busy',String(busy)); refreshButton.disabled = busy || !state.tenant; tenantSelect.disabled = busy || state.memberships.length === 0; };
+    const showNotice = (message) => { const notice = byId('notice'); notice.textContent = message || ''; notice.classList.toggle('visible',Boolean(message)); };
+    const request = async (path,options={}) => { const headers = {...(options.body ? {'content-type':'application/json'} : {}),...(state.tenant ? {'x-controlforge-tenant-id':state.tenant} : {})}; const response = await fetch(path,{method:options.method || 'GET',headers,...(options.body ? {body:JSON.stringify(options.body)} : {})}); if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error || ('Request failed with HTTP '+response.status)); } return response.json(); };
+    const renderMetrics = () => {
+      const item = state.summary; if (!item) return; const degraded = Number(item.processing_errors)>0 || Number(item.stale_devices)>0; const posture = Number(item.critical_open)>0 ? 'Critical attention' : degraded ? 'Degraded' : 'Monitoring';
+      byId('metrics').innerHTML = [['Security posture',posture,Number(item.critical_open)+' critical cases',degraded || Number(item.critical_open)>0 ? 'degraded' : ''],['Open case groups',state.groups.length,Number(item.open_cases)+' preserved case rows',''],['Alerts · 24h',item.alerts_24h,item.events_24h+' events received',''],['Pending approvals',item.pending_approvals,'Second-human decisions required',''],['Processing errors',item.processing_errors,item.pending_events+' events awaiting processing',Number(item.processing_errors)>0 ? 'degraded' : '']].map((metric) => '<article class="card metric"><div class="metric-label">'+escapeHtml(metric[0])+'</div><div class="metric-value posture '+escapeHtml(metric[3])+'">'+escapeHtml(metric[1])+'</div><div class="metric-detail">'+escapeHtml(metric[2])+'</div></article>').join('');
+      byId('health').innerHTML = [['Last event',item.last_event_at ? relativeTime(item.last_event_at) : 'No events',item.last_event_at ? absoluteTime(item.last_event_at) : 'Awaiting telemetry'],['Durable queue',Number(item.pending_events) ? item.pending_events+' pending' : 'Caught up',item.processing_errors+' processing errors'],['Endpoints',item.active_devices+' active',item.stale_devices+' stale or awaiting check-in'],['Case aggregation',state.groups.length+' groups',item.open_cases+' underlying open rows preserved']].map((health) => '<div class="health-item"><span class="metric-label">'+escapeHtml(health[0])+'</span><strong>'+escapeHtml(health[1])+'</strong><span class="secondary-text">'+escapeHtml(health[2])+'</span></div>').join('');
     };
-    document.querySelector('#load').addEventListener('click', async () => {
-      const tenant = document.querySelector('#tenant').value.trim();
-      if (!tenant) return;
-      localStorage.setItem('controlforgeTenant', tenant);
-      document.querySelector('#status').textContent = 'Loading';
-      try {
-        const [summary, cases, alerts] = await Promise.all([
-          request('/v1/dashboard/summary',tenant), request('/v1/cases?limit=20',tenant), request('/v1/alerts?limit=30',tenant)
-        ]);
-        document.querySelector('#metrics').innerHTML = [
-          ['Events (24h)',summary.events_24h],['Alerts (24h)',summary.alerts_24h],['Critical open',summary.critical_open],['Open cases',summary.open_cases]
-        ].map(([label,value]) => '<div class="card"><div class="label">'+escapeHtml(label)+'</div><div class="metric">'+escapeHtml(value)+'</div></div>').join('');
-        document.querySelector('#cases').innerHTML = cases.length ? '<table><thead><tr><th>Priority</th><th>Case</th><th>Status</th><th>Updated</th></tr></thead><tbody>'+cases.map(item => '<tr><td class="'+escapeHtml(item.priority)+'">'+escapeHtml(item.priority)+'</td><td>'+escapeHtml(item.title)+'<br><span class="label">'+escapeHtml(item.case_id)+'</span></td><td>'+escapeHtml(item.status)+'</td><td>'+escapeHtml(item.updated_at)+'</td></tr>').join('')+'</tbody></table>' : '<div class="empty">No cases.</div>';
-        document.querySelector('#alerts').innerHTML = alerts.length ? '<table><thead><tr><th>Severity</th><th>Detection</th><th>Actor</th><th>Time</th></tr></thead><tbody>'+alerts.map(item => '<tr><td class="'+escapeHtml(item.severity)+'">'+escapeHtml(item.severity)+'</td><td>'+escapeHtml(item.title)+'<br><span class="label">'+escapeHtml(item.rule_id)+'</span></td><td>'+escapeHtml(item.actor)+'</td><td>'+escapeHtml(item.created_at)+'</td></tr>').join('')+'</tbody></table>' : '<div class="empty">No alerts.</div>';
-        document.querySelector('#status').textContent = 'Connected';
-      } catch (error) {
-        document.querySelector('#status').textContent = 'Access denied or unavailable';
-        document.querySelector('#metrics').innerHTML = '<div class="error">'+escapeHtml(error.message)+'</div>';
-      }
-    });
-    const saved = localStorage.getItem('controlforgeTenant'); if(saved) document.querySelector('#tenant').value=saved;
+    const caseMatches = (item) => { const query = byId('case-search').value.trim().toLowerCase(); const severity = byId('severity-filter').value; const caseStatus = byId('status-filter').value; const source = byId('source-filter').value; const hours = Number(byId('time-filter').value || 0); const haystack = [item.title,item.actor,item.device_id,...item.rule_ids,...item.sources,...item.tags].join(' ').toLowerCase(); return (!query || haystack.includes(query)) && (!severity || item.priority===severity) && (!caseStatus || item.status===caseStatus) && (!source || item.sources.includes(source)) && (!hours || Date.parse(item.updated_at)>=Date.now()-hours*3600000); };
+    const renderCases = () => { const groups = state.groups.filter(caseMatches); byId('case-count').textContent = groups.length+' of '+state.groups.length+' groups'; if (!groups.length) { byId('case-queue').innerHTML = '<div class="empty">No case groups match these filters.</div>'; return; } byId('case-queue').innerHTML = table('Prioritized recurring case groups',['Priority','Detection','Affected entity','Recurrence','Status','Last activity'],groups.map((item) => '<tr><td>'+chip(item.priority)+'</td><td><button class="case-button" type="button" data-case-id="'+escapeHtml(item.case_id)+'">'+escapeHtml(item.title)+'</button><span class="secondary-text">'+escapeHtml(item.rule_ids.join(', '))+'</span></td><td>'+escapeHtml(item.device_id || item.actor)+'<span class="secondary-text">'+escapeHtml(item.sources.join(', '))+'</span></td><td><strong>'+escapeHtml(item.recurrence_count)+' signals</strong><span class="secondary-text">'+(item.case_count>1 ? escapeHtml(item.case_count)+' historical cases grouped' : 'One semantic case')+'</span></td><td>'+chip(item.status)+'</td><td>'+timeHtml(item.updated_at)+'</td></tr>')); };
+    const renderDevices = () => { const items = state.devices; byId('device-list').innerHTML = items.length ? table('Enrolled endpoint health',['State','Endpoint','Agent','Last telemetry'],items.map((item) => '<tr><td>'+chip(item.status)+'</td><td><strong>'+escapeHtml(item.display_name)+'</strong><span class="secondary-text">'+escapeHtml(item.platform || 'Unknown platform')+'</span></td><td>'+escapeHtml(item.agent_version || 'Not reported')+'</td><td>'+timeHtml(item.last_seen_at)+'</td></tr>')) : '<div class="empty">No endpoints are enrolled for this organization.</div>'; };
+    const renderAlerts = () => { const items = state.alerts; byId('alert-list').innerHTML = items.length ? table('Recent deterministic alerts',['Severity','Detection','Actor','Evidence','Time'],items.map((item) => '<tr><td>'+chip(item.severity)+'</td><td><strong>'+escapeHtml(item.title)+'</strong><span class="secondary-text">'+escapeHtml(item.rule_id)+'</span></td><td>'+escapeHtml(item.actor)+'</td><td>'+escapeHtml((item.reasons || []).slice(0,2).join(' · ') || 'No reason text stored')+'</td><td>'+timeHtml(item.created_at)+'</td></tr>')) : '<div class="empty">No deterministic alerts have been recorded.</div>'; };
+    const renderActions = () => { const pending = state.actions.filter((item) => item.status==='proposed' || item.status==='approved' || item.status==='dispatched'); byId('approval-list').innerHTML = pending.length ? pending.slice(0,10).map((item) => '<article class="approval-item"><header><strong>'+escapeHtml(titleCase(item.action_type))+'</strong>'+chip(item.status)+'</header><p>'+escapeHtml(item.rationale)+'</p><span class="secondary-text">'+escapeHtml(item.target_type)+': '+escapeHtml(item.target_id)+' · expires '+escapeHtml(relativeTime(item.expires_at))+'</span><button class="case-button secondary-text" type="button" data-case-id="'+escapeHtml(item.case_id)+'">Review case evidence</button></article>').join('') : '<div class="empty">No actions are awaiting review or execution.</div>'; };
+    const populateSources = () => { const selected = byId('source-filter').value; const values = [...new Set(state.groups.flatMap((item) => item.sources))].sort(); byId('source-filter').innerHTML = '<option value="">All sources</option>'+values.map((value) => '<option value="'+escapeHtml(value)+'">'+escapeHtml(titleCase(value))+'</option>').join(''); byId('source-filter').value = values.includes(selected) ? selected : ''; };
+    const renderDetail = (detail) => {
+      const selectedCase = detail.case; const canManage = state.role !== 'viewer'; const canTriage = canManage; const canApprove = state.role === 'responder' || state.role === 'admin'; byId('detail-title').textContent = selectedCase.title;
+      const alerts = detail.alerts.map((alert) => { const provenance=alert.rule_provenance || {}; const provenanceText=provenance.rule_version && provenance.rule_digest ? 'Rule v'+escapeHtml(provenance.rule_version)+' · '+escapeHtml(provenance.rule_digest)+' · '+escapeHtml(provenance.fingerprint_version) : 'Legacy Cloud alert · rule version and digest unknown'; const replayText=provenance.original_replay_available ? 'Immutable rule snapshot stored. Stateful original replay uses currently retained event-time history.' : 'Immutable rule snapshot unavailable; original replay unavailable.'; const originalReplay=provenance.original_replay_available ? '<button class="button secondary" type="button" data-replay-alert="'+escapeHtml(alert.alert_id)+'" data-replay-mode="original">Replay original rule</button>' : ''; return '<article class="timeline-item"><h3>'+chip(alert.severity)+' '+escapeHtml(alert.title)+'</h3><div class="facts"><span class="chip">'+escapeHtml(alert.rule_id)+'</span><span class="chip">'+escapeHtml(alert.event.event_type)+'</span><span class="chip">'+escapeHtml(alert.actor)+'</span></div><ul class="evidence">'+(alert.reasons || []).map((reason) => '<li>'+escapeHtml(reason)+'</li>').join('')+'</ul><span class="secondary-text">Evidence digest '+escapeHtml(alert.event.payload_sha256)+' · '+escapeHtml(relativeTime(alert.created_at))+'</span><span class="secondary-text">'+provenanceText+'</span><span class="secondary-text">'+replayText+'</span><div class="detail-actions">'+(canTriage ? '<button class="button secondary" type="button" data-triage-alert="'+escapeHtml(alert.alert_id)+'">Request advisory triage</button><button class="button secondary" type="button" data-replay-alert="'+escapeHtml(alert.alert_id)+'" data-replay-mode="current">Replay current detector</button>'+originalReplay : '')+'</div></article>'; }).join('');
+      const triage = detail.triage_assessments.length ? detail.triage_assessments.map((item) => '<article class="timeline-item"><h3>Advisory assessment · '+escapeHtml(item.model)+'</h3><p>'+escapeHtml(item.assessment && item.assessment.summary)+'</p><span class="secondary-text">Human review required · '+escapeHtml(relativeTime(item.created_at))+'</span></article>').join('') : '<div class="empty">No advisory triage assessment is stored.</div>';
+      const actions = detail.response_actions.length ? detail.response_actions.map((item) => '<article class="timeline-item"><h3>'+escapeHtml(titleCase(item.action_type))+' '+chip(item.status)+'</h3><p>'+escapeHtml(item.rationale)+'</p><span class="secondary-text">Proposed by '+escapeHtml(item.proposed_by)+' · target '+escapeHtml(item.target_id)+' · expires '+escapeHtml(relativeTime(item.expires_at))+'</span>'+(canApprove && item.status==='proposed' && item.proposed_by !== state.principal.id ? '<div class="decision"><label>Independent decision rationale<textarea data-rationale-for="'+escapeHtml(item.action_id)+'" placeholder="Record why this action should be approved or rejected"></textarea></label><div class="decision-buttons"><button class="button" type="button" data-action-id="'+escapeHtml(item.action_id)+'" data-decision="approve">Approve</button><button class="button danger" type="button" data-action-id="'+escapeHtml(item.action_id)+'" data-decision="reject">Reject</button></div></div>' : '')+'</article>').join('') : '<div class="empty">No response actions are attached to this case.</div>';
+      const notes = detail.notes.length ? detail.notes.map((item) => '<article class="timeline-item"><p>'+escapeHtml(item.body)+'</p><span class="secondary-text">'+escapeHtml(item.created_by)+' · '+escapeHtml(relativeTime(item.created_at))+'</span></article>').join('') : '<div class="empty">No analyst notes have been recorded.</div>';
+      const currentDisposition = detail.dispositions.some((item) => !selectedCase.disposition_required_after || item.created_at >= selectedCase.disposition_required_after);
+      const dispositions = detail.dispositions.length ? detail.dispositions.map((item) => '<article class="timeline-item"><h3>'+escapeHtml(titleCase(item.disposition))+'</h3><p>'+escapeHtml(item.rationale)+'</p>'+(item.false_positive_reason ? '<span class="secondary-text">False-positive reason · '+escapeHtml(item.false_positive_reason)+'</span>' : '')+'<span class="secondary-text">'+escapeHtml(item.created_by)+' · '+escapeHtml(relativeTime(item.created_at))+'</span></article>').join('') : '<div class="empty">No disposition is recorded. A disposition is required before closure.</div>';
+      const transitionMap = {open:['investigating','closed'],investigating:['contained','closed'],contained:['investigating','closed'],closed:['open']};
+      let nextStates = transitionMap[selectedCase.status] || [];
+      if (!currentDisposition) nextStates = nextStates.filter((item) => item !== 'closed');
+      if (selectedCase.status === 'closed' && !selectedCase.semantic_key) nextStates = [];
+      const transitions = canManage ? nextStates.map((item) => '<button class="button '+(item==='closed' ? 'danger' : 'secondary')+'" type="button" data-case-transition="'+escapeHtml(item)+'">'+escapeHtml(titleCase(item))+'</button>').join('') : '';
+      const actionChoices = canApprove ? ['collect_diagnostics','enrich_indicator','isolate_endpoint','release_endpoint','disable_identity','revoke_sessions'] : ['collect_diagnostics','enrich_indicator'];
+      const primaryAlert = detail.alerts[0]; const defaultTarget = primaryAlert ? (primaryAlert.event.device_id || primaryAlert.event.target || primaryAlert.actor) : '';
+      const assigneeOptions = '<option value="">Unassigned</option>'+state.assignees.map((item) => '<option value="'+escapeHtml(item.principal_id)+'"'+(selectedCase.assignee_principal_id===item.principal_id ? ' selected' : '')+'>'+escapeHtml(item.principal_id)+' · '+escapeHtml(titleCase(item.role))+'</option>').join('');
+      const workflow = canManage ? '<div class="workflow-grid"><form class="workflow-form" id="case-assignment-form"><h3>Case ownership</h3><label>Assignee<select name="assignee_principal_id">'+assigneeOptions+'</select></label><span class="secondary-text">Only eligible organization members are listed. Every change is audited.</span><button class="button" type="submit">Update assignment</button></form><form class="workflow-form" id="case-note-form"><h3>Add analyst note</h3><label>Append-only note<textarea name="body" required maxlength="4000" placeholder="Record evidence, reasoning, and follow-up context"></textarea></label><button class="button" type="submit">Add note</button></form><form class="workflow-form" id="case-disposition-form"><h3>Record disposition</h3><label>Disposition<select name="disposition"><option value="true_positive">True positive</option><option value="false_positive">False positive</option><option value="benign">Benign</option><option value="inconclusive">Inconclusive</option></select></label><label>Rationale<textarea name="rationale" required minlength="10" maxlength="2000" placeholder="Explain the evidence supporting this disposition"></textarea></label><label>False-positive reason, when applicable<input name="false_positive_reason" maxlength="1000" placeholder="Required only for false positives"></label><button class="button" type="submit">Record disposition</button></form><form class="workflow-form" id="response-proposal-form"><h3>Propose bounded response</h3><label>Action<select name="action_type">'+actionChoices.map((item) => '<option value="'+item+'">'+escapeHtml(titleCase(item))+'</option>').join('')+'</select></label><label>Exact target<input name="target_id" required maxlength="320" value="'+escapeHtml(defaultTarget)+'"></label><label>Rationale<textarea name="rationale" required minlength="10" maxlength="2000" placeholder="Explain why this action is necessary"></textarea></label><button class="button" type="submit">Propose action</button><span class="secondary-text">Active actions still require approval by a different responder.</span></form><div class="workflow-form"><h3>Case status</h3><p class="secondary-text">Allowed from '+escapeHtml(titleCase(selectedCase.status))+': '+(nextStates.length ? escapeHtml(nextStates.map(titleCase).join(', ')) : 'no safe transition')+'.</p><div class="detail-actions">'+transitions+'</div>'+(!currentDisposition && selectedCase.status!=='closed' ? '<span class="secondary-text">Record a disposition for this investigation cycle before closing.</span>' : '')+(selectedCase.status==='closed' && !selectedCase.semantic_key ? '<span class="secondary-text">Legacy cases without a semantic key cannot be reopened safely.</span>' : '')+'</div></div>' : '<div class="empty">Your viewer role has read-only case access.</div>';
+      const audit = detail.audit.length ? detail.audit.map((item) => '<article class="timeline-item"><h3>'+escapeHtml(titleCase(item.action))+'</h3><span class="secondary-text">'+escapeHtml(item.actor_type)+': '+escapeHtml(item.actor_id)+' · '+escapeHtml(relativeTime(item.created_at))+'</span></article>').join('') : '<div class="empty">No case-scoped audit entries are stored.</div>';
+      byId('detail-body').innerHTML = '<div class="notice" id="detail-notice" role="status" aria-live="polite"></div><div class="detail-grid"><div class="detail-stat"><span class="metric-label">Priority</span><strong class="secondary-text">'+escapeHtml(titleCase(selectedCase.priority))+'</strong></div><div class="detail-stat"><span class="metric-label">Status</span><strong class="secondary-text">'+escapeHtml(titleCase(selectedCase.status))+'</strong></div><div class="detail-stat"><span class="metric-label">Owner</span><strong class="secondary-text">'+escapeHtml(selectedCase.assignee_principal_id || 'Unassigned')+'</strong></div><div class="detail-stat"><span class="metric-label">Opened</span><strong class="secondary-text">'+escapeHtml(relativeTime(selectedCase.opened_at))+'</strong></div></div><section class="detail-section"><h2>Case workflow</h2>'+workflow+'</section><section class="detail-section"><h2>Analyst notes</h2><div class="timeline">'+notes+'</div></section><section class="detail-section"><h2>Dispositions</h2><div class="timeline">'+dispositions+'</div></section><section class="detail-section"><h2>Evidence timeline</h2><div class="timeline">'+alerts+'</div></section><section class="detail-section"><h2>Advisory triage</h2><div class="timeline">'+triage+'</div></section><section class="detail-section"><h2>Approvals and outcomes</h2><div class="timeline">'+actions+'</div></section><section class="detail-section"><h2>Audit lineage</h2><div class="timeline">'+audit+'</div></section>';
+    };
+    const showDetailNotice = (message,isError=false) => { const notice=byId('detail-notice'); if (!notice) { showNotice(message); return; } notice.textContent=message; notice.classList.add('visible'); notice.setAttribute('role',isError ? 'alert' : 'status'); };
+    const openCase = async (caseId) => { if (!detailDialog.open) detailDialog.showModal(); byId('detail-body').innerHTML = '<div class="loading">Loading evidence, provenance, triage, approvals, and audit.</div>'; try { state.selected = caseId; renderDetail(await request('/v1/cases/'+encodeURIComponent(caseId))); } catch (error) { byId('detail-body').innerHTML = '<div class="error" role="alert">'+escapeHtml(error.message)+'</div>'; } };
+    const loadOperations = async () => { if (!state.tenant) return; setBusy(true); showNotice(''); status.textContent = 'Refreshing operational evidence'; status.classList.remove('connected'); try { const results = await Promise.all([request('/v1/dashboard/summary'),request('/v1/devices?limit=200'),request('/v1/case-queue?limit=250'),request('/v1/alerts?limit=25'),request('/v1/response-actions?limit=100'),request('/v1/case-assignees')]); state.summary=results[0]; state.devices=results[1]; state.groups=results[2].groups; state.alerts=results[3]; state.actions=results[4]; state.assignees=results[5].assignees; populateSources(); renderMetrics(); renderCases(); renderDevices(); renderAlerts(); renderActions(); if (results[2].scan_truncated) showNotice('The grouped queue reached its 10,000-row scan bound. Narrowing server-side pagination remains required for complete history.'); status.textContent='Connected · evidence current'; status.classList.add('connected'); byId('updated').textContent='Updated '+absoluteTime(new Date().toISOString()); } catch (error) { status.textContent='Operational evidence unavailable'; showNotice(error.message); } finally { setBusy(false); } };
+    document.addEventListener('click',async (event) => { const target = event.target.closest('button'); if (!target) return; if (target.dataset.caseId) { await openCase(target.dataset.caseId); return; } if (target.dataset.caseTransition) { target.disabled=true; try { await request('/v1/cases/'+encodeURIComponent(state.selected)+'/transitions',{method:'POST',body:{status:target.dataset.caseTransition}}); await Promise.all([openCase(state.selected),loadOperations()]); showDetailNotice('Case status changed to '+titleCase(target.dataset.caseTransition)+'.'); } catch (error) { showDetailNotice(error.message,true); } finally { target.disabled=false; } return; } if (target.dataset.replayAlert) { target.disabled=true; try { const mode=target.dataset.replayMode || 'current'; const result=await request('/v1/alerts/'+encodeURIComponent(target.dataset.replayAlert)+'/replay?mode='+encodeURIComponent(mode),{method:'POST'}); target.textContent='Replay: '+titleCase(result.outcome); showDetailNotice(titleCase(mode)+'-rule replay completed with outcome '+titleCase(result.outcome)+'.'); } catch (error) { showDetailNotice(error.message,true); } finally { target.disabled=false; } return; } if (target.dataset.triageAlert) { target.disabled=true; try { await request('/v1/alerts/'+encodeURIComponent(target.dataset.triageAlert)+'/triage',{method:'POST'}); await openCase(state.selected); showDetailNotice('Advisory triage completed. Human review is still required.'); } catch (error) { showDetailNotice(error.message,true); } finally { target.disabled=false; } return; } if (target.dataset.actionId && target.dataset.decision) { const rationaleInput=detailDialog.querySelector('[data-rationale-for="'+CSS.escape(target.dataset.actionId)+'"]'); const rationale=rationaleInput ? rationaleInput.value.trim() : ''; if (rationale.length<3) { showDetailNotice('Record at least three characters of independent rationale.',true); return; } target.disabled=true; try { await request('/v1/actions/'+encodeURIComponent(target.dataset.actionId)+'/decision',{method:'POST',body:{decision:target.dataset.decision,rationale}}); await Promise.all([openCase(state.selected),loadOperations()]); showDetailNotice('Independent response decision recorded.'); } catch (error) { showDetailNotice(error.message,true); } finally { target.disabled=false; } } });
+    document.addEventListener('submit',async (event) => { const form=event.target; if (!form.matches('#case-assignment-form,#case-note-form,#case-disposition-form,#response-proposal-form')) return; event.preventDefault(); const submit=form.querySelector('button[type="submit"]'); submit.disabled=true; const data=new FormData(form); try { if (form.id==='case-assignment-form') { const assignee=String(data.get('assignee_principal_id') || ''); await request('/v1/cases/'+encodeURIComponent(state.selected)+'/assignment',{method:'POST',body:{assignee_principal_id:assignee || null}}); await Promise.all([openCase(state.selected),loadOperations()]); showDetailNotice(assignee ? 'Case owner updated.' : 'Case returned to the unassigned queue.'); } else if (form.id==='case-note-form') { await request('/v1/cases/'+encodeURIComponent(state.selected)+'/notes',{method:'POST',body:{body:String(data.get('body') || '')}}); await openCase(state.selected); showDetailNotice('Append-only analyst note recorded.'); } else if (form.id==='case-disposition-form') { const disposition=String(data.get('disposition') || ''); const falsePositiveReason=String(data.get('false_positive_reason') || '').trim(); const body={disposition,rationale:String(data.get('rationale') || '')}; if (disposition==='false_positive') body.false_positive_reason=falsePositiveReason; await request('/v1/cases/'+encodeURIComponent(state.selected)+'/dispositions',{method:'POST',body}); await openCase(state.selected); showDetailNotice('Append-only disposition recorded.'); } else { const actionType=String(data.get('action_type') || ''); const targetType=actionType==='enrich_indicator' ? 'indicator' : actionType==='disable_identity' || actionType==='revoke_sessions' ? 'identity' : 'device'; await request('/v1/cases/'+encodeURIComponent(state.selected)+'/actions',{method:'POST',body:{action_type:actionType,target_type:targetType,target_id:String(data.get('target_id') || ''),rationale:String(data.get('rationale') || ''),expires_in_minutes:60}}); await Promise.all([openCase(state.selected),loadOperations()]); showDetailNotice('Response proposed. Active actions still require approval by a different responder.'); } } catch (error) { showDetailNotice(error.message,true); } finally { submit.disabled=false; } });
+    byId('close-detail').addEventListener('click',() => detailDialog.close()); detailDialog.addEventListener('click',(event) => { if (event.target===detailDialog) detailDialog.close(); }); refreshButton.addEventListener('click',loadOperations);
+    tenantSelect.addEventListener('change',async () => { state.tenant=tenantSelect.value; const membership=state.memberships.find((item) => item.tenant_id===state.tenant); state.role=membership ? membership.role : 'viewer'; setRole(state.role); await loadOperations(); }); byId('case-filters').addEventListener('input',renderCases); byId('case-filters').addEventListener('submit',(event) => event.preventDefault());
+    try { const me=await request('/v1/me'); state.memberships=me.tenants; state.principal=me.principal; byId('identity').textContent=me.principal.email || me.principal.id; tenantSelect.innerHTML=state.memberships.length ? state.memberships.map((membership) => '<option value="'+escapeHtml(membership.tenant_id)+'">'+escapeHtml(membership.display_name)+'</option>').join('') : '<option value="">No organizations available</option>'; state.tenant=tenantSelect.value; const membership=state.memberships.find((item) => item.tenant_id===state.tenant); state.role=membership ? membership.role : 'viewer'; setRole(state.role); setBusy(false); if (state.tenant) await loadOperations(); else { status.textContent='No active organization membership'; showNotice('Ask an administrator to add this identity to an organization.'); } } catch (error) { setBusy(false); status.textContent='Authentication or membership lookup failed'; showNotice(error.message); }
   </script>
 </body>
 </html>`;

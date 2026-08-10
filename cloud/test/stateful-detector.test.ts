@@ -1,8 +1,19 @@
 import { env } from "cloudflare:workers";
+import statefulVectors from "../../tests/fixtures/detection_conformance/stateful.v1.json";
 import { describe, expect, it } from "vitest";
 
-import { detectEvent } from "../src/detector";
+import { detectEvent, replayStoredSnapshot } from "../src/detector";
+import { compiledDetectionProvenance } from "../src/sigma";
 import type { StoredEvent } from "../src/types";
+
+interface VectorEvent {
+  event_id: string;
+  event_type: string;
+  timestamp: string;
+  actor: string;
+  source_ip?: string;
+  attributes: Record<string, unknown>;
+}
 
 async function tenant(): Promise<string> {
   const tenantId = crypto.randomUUID();
@@ -39,6 +50,43 @@ async function insertEvent(
 }
 
 describe("stateful SIEM correlation", () => {
+  it("matches the shared cross-runtime stateful decision vectors", async () => {
+    for (const vector of statefulVectors.vectors) {
+      const tenantId = await tenant();
+      for (const raw of vector.prior_events as VectorEvent[]) {
+        await insertEvent(
+          tenantId,
+          raw.event_id,
+          raw.event_type,
+          raw.timestamp,
+          raw.actor,
+          raw.attributes,
+          raw.source_ip ?? null,
+        );
+      }
+      const raw = vector.event as VectorEvent;
+      const current = await insertEvent(
+        tenantId,
+        raw.event_id,
+        raw.event_type,
+        raw.timestamp,
+        raw.actor,
+        raw.attributes,
+        raw.source_ip ?? null,
+      );
+      const alerts = await detectEvent(current, env.DB);
+      expect(alerts.map((alert) => ({
+        rule_id: alert.ruleId,
+        rule_version: alert.ruleVersion,
+        rule_digest: alert.ruleDigest,
+        title: alert.title,
+        severity: alert.severity,
+        reasons: alert.reasons,
+        tags: alert.tags,
+      })), vector.id).toEqual([vector.expected]);
+    }
+  });
+
   it("detects bulk sensitive-data access by count", async () => {
     const tenantId = await tenant();
     let current: StoredEvent | undefined;
@@ -55,6 +103,27 @@ describe("stateful SIEM correlation", () => {
     if (!current) throw new Error("current event missing");
     const alerts = await detectEvent(current, env.DB);
     expect(alerts.map((alert) => alert.ruleId)).toContain("CF-INSIDER-001");
+    expect(alerts.find((alert) => alert.ruleId === "CF-INSIDER-001")?.reasons).toEqual([
+      "10 access events within 15m",
+      "10000 bytes accessed",
+    ]);
+    await expect(detectEvent(current, env.DB)).resolves.toEqual(alerts);
+    const provenance = compiledDetectionProvenance("CF-INSIDER-001");
+    const original = await replayStoredSnapshot(
+      current,
+      provenance.ruleSnapshot,
+      provenance.ruleDigest,
+      env.DB,
+    );
+    expect(original).toMatchObject({
+      snapshotKind: "correlation",
+      evidenceBasis: "current_retained_history",
+      alert: {
+        ruleId: "CF-INSIDER-001",
+        ruleVersion: 1,
+        ruleDigest: provenance.ruleDigest,
+      },
+    });
   });
 
   it("detects impossible travel from the previous authentication", async () => {
@@ -77,6 +146,10 @@ describe("stateful SIEM correlation", () => {
     );
     const alerts = await detectEvent(current, env.DB);
     expect(alerts.map((alert) => alert.ruleId)).toContain("CF-IDENTITY-001");
+    expect(alerts.find((alert) => alert.ruleId === "CF-IDENTITY-001")?.reasons).toEqual([
+      "calculated travel velocity 8258 km/h",
+      "distance 4129 km over 0.50h",
+    ]);
   });
 
   it("detects credential stuffing only after both thresholds are reached", async () => {
@@ -96,6 +169,10 @@ describe("stateful SIEM correlation", () => {
     if (!current) throw new Error("current event missing");
     const alerts = await detectEvent(current, env.DB);
     expect(alerts.map((alert) => alert.ruleId)).toContain("CF-EDGE-002");
+    expect(alerts.find((alert) => alert.ruleId === "CF-EDGE-002")?.reasons).toEqual([
+      "20 failed authentications from 198.51.100.44",
+      "10 distinct accounts within 5m",
+    ]);
   });
 
   it("detects cross-address reuse of a hashed session", async () => {
@@ -121,5 +198,50 @@ describe("stateful SIEM correlation", () => {
     );
     const alerts = await detectEvent(current, env.DB);
     expect(alerts.map((alert) => alert.ruleId)).toContain("CF-EDGE-003");
+    expect(alerts.find((alert) => alert.ruleId === "CF-EDGE-003")?.reasons).toEqual([
+      "session hash reused from 198.51.100.10 and 203.0.113.20",
+      "reuse occurred within 10m",
+    ]);
+  });
+
+  it("excludes malformed values, future events, and other tenants from correlation", async () => {
+    const tenantId = await tenant();
+    const otherTenantId = await tenant();
+    for (let index = 0; index < 9; index += 1) {
+      await insertEvent(
+        tenantId,
+        `malformed-${String(index)}`,
+        "sensitive_data_access",
+        `2026-08-18T06:00:${String(index).padStart(2, "0")}Z`,
+        "contractor@example.com",
+        { bytes: true },
+      );
+      await insertEvent(
+        tenantId,
+        `future-${String(index)}`,
+        "sensitive_data_access",
+        `2026-08-18T07:00:${String(index).padStart(2, "0")}Z`,
+        "contractor@example.com",
+        { bytes: 10_000_000 },
+      );
+      await insertEvent(
+        otherTenantId,
+        `other-${String(index)}`,
+        "sensitive_data_access",
+        `2026-08-18T06:00:${String(index).padStart(2, "0")}Z`,
+        "contractor@example.com",
+        { bytes: 10_000_000 },
+      );
+    }
+    const current = await insertEvent(
+      tenantId,
+      "bounded-current",
+      "sensitive_data_access",
+      "2026-08-18T06:00:09Z",
+      "contractor@example.com",
+      { bytes: 1_000 },
+    );
+
+    await expect(detectEvent(current, env.DB)).resolves.toEqual([]);
   });
 });

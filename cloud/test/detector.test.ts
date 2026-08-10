@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { detectStatelessEvent } from "../src/detector";
+import { detectStatelessEvent, replayStoredSnapshot } from "../src/detector";
+import { compiledDetectionProvenance } from "../src/sigma";
 import type { StoredEvent } from "../src/types";
 
 function event(overrides: Partial<StoredEvent> = {}): StoredEvent {
@@ -72,7 +73,44 @@ describe("deterministic detections", () => {
       attributes_json: JSON.stringify({ status: "failed", installed: false, running: false }),
     }));
     expect(alerts.map((alert) => alert.ruleId)).toEqual(["CF-CONTROL-001"]);
-    expect(alerts[0]?.reasons[0]).toContain("microsoft-defender");
+    expect(alerts[0]?.title).toBe("Required endpoint security control failed");
+    expect(alerts[0]?.severity).toBe("high");
+    expect(alerts[0]?.reasons).toEqual([
+      "endpoint control microsoft-defender reported failed",
+      "installed=false running=false",
+    ]);
+  });
+
+  it.each([
+    ["CF-ENDPOINT-001", event(), "sigma"],
+    ["CF-CONTROL-001", event({
+      event_type: "endpoint_control_status",
+      target: "microsoft-defender",
+      attributes_json: JSON.stringify({ status: "failed", installed: false, running: false }),
+    }), "builtin"],
+  ])("replays the immutable %s snapshot", async (ruleId, sourceEvent, expectedKind) => {
+    const provenance = compiledDetectionProvenance(ruleId);
+    const replay = await replayStoredSnapshot(
+      sourceEvent,
+      provenance.ruleSnapshot,
+      provenance.ruleDigest,
+      {} as D1Database,
+    );
+
+    expect(replay.snapshotKind).toBe(expectedKind);
+    expect(replay.evidenceBasis).toBe("source_event");
+    expect(replay.alert?.ruleId).toBe(ruleId);
+    expect(replay.alert?.ruleDigest).toBe(provenance.ruleDigest);
+  });
+
+  it("rejects a tampered immutable snapshot", async () => {
+    const provenance = compiledDetectionProvenance("CF-ENDPOINT-001");
+    await expect(replayStoredSnapshot(
+      event(),
+      { ...provenance.ruleSnapshot, title: "Tampered title" },
+      provenance.ruleDigest,
+      {} as D1Database,
+    )).rejects.toThrow("snapshot digest does not match");
   });
 
   it.each([

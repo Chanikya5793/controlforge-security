@@ -16,11 +16,15 @@ export interface Env {
   GEMINI_MODEL: string;
 }
 
-export interface QueuedEvent {
+interface QueuedEventBase {
   tenantId: string;
-  eventId: string;
   attemptId: string;
 }
+
+export type QueuedEvent = QueuedEventBase & (
+  | { eventId: string; eventIds?: never }
+  | { eventId?: never; eventIds: string[] }
+);
 
 export interface AuthenticatedPrincipal {
   id: string;
@@ -28,6 +32,7 @@ export interface AuthenticatedPrincipal {
   email?: string;
   tenantId?: string;
   credentialId?: string;
+  deviceId?: string;
 }
 
 export interface StoredEvent {
@@ -55,12 +60,23 @@ export interface DetectionAlert {
   actor: string;
   reasons: string[];
   tags: string[];
+  ruleVersion: number;
+  ruleDigest: string;
+  ruleSnapshot: Record<string, unknown>;
+  fingerprintVersion: "alert-fingerprint-v1";
+  detectorVersion: "controlforge-cloud-canonical-v1";
+  evidence: {
+    source_event_id: string;
+    source_event_sha256: string;
+    matched_evidence: string[];
+  };
   createdAt: string;
 }
 
 export interface CollectorCredential {
   credential_id: string;
   tenant_id: string;
+  device_id: string | null;
   secret_ciphertext: string;
   secret_iv: string;
   expires_at: string;
@@ -78,6 +94,12 @@ export interface AlertRow {
   actor: string;
   reasons_json: string;
   tags_json: string;
+  rule_version: number | null;
+  rule_digest: string | null;
+  rule_snapshot_json: string | null;
+  fingerprint_version: string;
+  detector_version: string;
+  evidence_json: string;
   created_at: string;
 }
 

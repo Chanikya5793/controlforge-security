@@ -167,14 +167,15 @@ export async function requireCollector(
   if (skew > MAX_CLOCK_SKEW_SECONDS) throw new AuthenticationError("collector timestamp is stale");
 
   const credential = await env.DB.prepare(
-    `SELECT c.credential_id, c.tenant_id, c.secret_ciphertext, c.secret_iv,
+    `SELECT c.credential_id, c.tenant_id, c.device_id, c.secret_ciphertext, c.secret_iv,
             c.expires_at, c.revoked_at, t.status AS tenant_status
        FROM collector_credentials c
        JOIN tenants t ON t.tenant_id = c.tenant_id
       WHERE c.credential_id = ?`,
   ).bind(headers.credentialId).first<CollectorCredential>();
   if (
-    !credential || credential.revoked_at || credential.tenant_status !== "active" ||
+    !credential || !credential.device_id || credential.revoked_at
+    || credential.tenant_status !== "active" ||
     Date.parse(credential.expires_at) <= Date.now()
   ) {
     throw new AuthenticationError("collector credential is not active");
@@ -212,6 +213,7 @@ export async function requireCollector(
     type: "collector",
     tenantId: credential.tenant_id,
     credentialId: credential.credential_id,
+    deviceId: credential.device_id,
   };
 }
 
