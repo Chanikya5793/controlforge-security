@@ -1,0 +1,23 @@
+id: CF-EMAIL-001
+title: High-confidence phishing email indicators
+description: Detects failed authentication paired with credential-themed links or lookalike domains.
+status: experimental
+logsource:
+  category: email
+detection:
+  selection_auth:
+    event_type: email_received
+    dmarc: fail
+  selection_link:
+    url_path|contains:
+      - login
+      - verify
+      - password
+  selection_domain:
+    sender_domain|re: "(xn--|[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)"
+  condition: selection_auth and selection_link or selection_domain
+level: high
+tags:
+  - phishing
+  - email-security
+  - social-engineering
