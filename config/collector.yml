@@ -1,9 +1,16 @@
 api_host: soc.chanakyachowdary.in
+api_port: 443
 device_id: nw55074-controlforge
 controls_path: /Library/Application Support/ControlForge/agents.yml
 spool_path: /Library/Application Support/ControlForge/controlforge-agent-spool.db
+status_snapshot_path: /Library/ControlForge/status/agent-status.json
 credential_source: macos_system_keychain
 keychain_service: com.controlforge.collector.v2
+access_proxy_required: true
+action_polling_enabled: true
+credential_rotation_enabled: false
+response_adapter_enabled: false
+response_state_path: /Library/Application Support/ControlForge/response/pf-state.json
 santa:
   enabled: true
   log_path: /var/db/santa/santa.log
