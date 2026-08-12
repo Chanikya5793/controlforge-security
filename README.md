@@ -33,7 +33,7 @@ flowchart LR
 
 - **Endpoint control assurance:** validates configured install evidence, process state, and optional heartbeat freshness. Example configurations cover CrowdStrike Falcon, Microsoft Defender for Endpoint, and SentinelOne.
 - **Detection-as-code:** loads version-controlled YAML rules, validates their schema, and emits deterministic alert IDs and human-readable match reasons.
-- **Supported Sigma-style operators:** equality/wildcards, `contains`, `startswith`, `endswith`, regular expressions, CIDR membership, `and`, `or`, `and not`, `1 of`, and `all of`.
+- **Supported Sigma-style operators:** equality/wildcards, `contains`, `startswith`, `endswith`, regular expressions, CIDR membership, parenthesized expressions, `not`, `and`, `or`, `1 of`, and `all of`, with standard boolean precedence.
 - **Stateful analytics:** detects impossible-travel authentication and unusual sensitive-data access volume.
 - **Investigation workflow:** persists normalized events and deduplicated alerts in SQLite, with bounded alert retrieval.
 - **Operational interfaces:** command-line scanning plus a typed FastAPI service with OpenAPI documentation.
