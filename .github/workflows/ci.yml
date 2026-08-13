@@ -33,6 +33,12 @@ jobs:
         run: bandit -c pyproject.toml -r src
       - name: Build distributions
         run: python -m build
+      - name: Verify isolated wheel CLI
+        run: |
+          python -m venv "$RUNNER_TEMP/controlforge-wheel-smoke"
+          "$RUNNER_TEMP/controlforge-wheel-smoke/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/controlforge-wheel-smoke/bin/controlforge" --help
+          "$RUNNER_TEMP/controlforge-wheel-smoke/bin/controlforge" standalone --help
 
   container:
     runs-on: ubuntu-latest
