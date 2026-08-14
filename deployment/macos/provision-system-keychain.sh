@@ -4,13 +4,27 @@ set -eu
 service="com.controlforge.collector.v2"
 collector="/Library/ControlForge/bin/controlforge"
 keychain="/Library/Keychains/System.keychain"
+mode="${1:-cloud}"
+
+case "$mode" in
+  cloud)
+    accounts="credential-id credential-secret access-client-id access-client-secret"
+    ;;
+  standalone)
+    accounts="credential-id credential-secret"
+    ;;
+  *)
+    echo "Usage: $0 [cloud|standalone]" >&2
+    exit 64
+    ;;
+esac
 
 if [ ! -x "$collector" ]; then
   echo "Install the ControlForge package before provisioning credentials." >&2
   exit 1
 fi
 
-for account in credential-id credential-secret access-client-id access-client-secret; do
+for account in $accounts; do
   echo "Enter the secret value for $account when prompted. Input will be hidden."
   /usr/bin/sudo /usr/bin/security add-generic-password \
     -U -s "$service" -a "$account" -T "$collector" "$keychain" -w
