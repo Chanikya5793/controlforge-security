@@ -50,20 +50,53 @@ The fixture probe allows every branch to be reproduced without requiring an EDR 
 - FastAPI exposes the same application services to integration clients.
 - OpenAPI schemas are generated from the same typed models used internally.
 
+### Standalone SOC path
+
+1. A single runtime owns a private `0600` SQLite database, WAL durability, ordered migrations,
+   and a lifetime shared lock that makes restore prove the runtime is offline.
+2. Console bootstrap and WebAuthn passkeys create hashed sessions with Secure/HttpOnly/Strict
+   cookies, origin checks, CSRF verification, role capabilities, and bounded public-route rate
+   limits.
+3. One-use enrollment grants produce UUID collector credentials encrypted with AES-256-GCM.
+   The same device may resume a locally failed claim only before its first authenticated check-in;
+   a different device, expired grant, or already-seen endpoint fails closed.
+4. Device-bound HMAC ingestion atomically creates durable detection jobs. A supervised worker
+   reclaims expired leases and transactionally converges on one alert occurrence. Same-rule
+   occurrences from the same device (or normalized actor fallback) link to one active semantic
+   case; closing it frees the key for a fresh successor case without rewriting history.
+5. Alerts retain the event digest, exact rule version/digest/snapshot, detector version, evidence,
+   and fingerprint version. Original and current replay write separate evaluation records rather
+   than rewriting the historical alert.
+6. Case notes, dispositions, false-positive reasons, close, and reopen transitions are tenant- and
+   role-scoped. Each case mutation appends to an HMAC chain with append-only checkpoints. Queue
+   recurrence counts are exact; detail reads bound evidence to the newest 200 alerts, activity to
+   500 entries, and dispositions to 200 while explicitly reporting truncation.
+7. Online SQLite snapshots are streamed into AES-256-GCM backup artifacts using a purpose-separated
+   HKDF key. Restore authenticates and verifies schema, tenant, checksum, integrity, and foreign keys
+   before an atomic offline replacement.
+8. The admin console is a CSP-nonce, same-origin web application. The local macOS app reads only a
+   bounded redacted status snapshot, including enum-only containment posture and a bounded release
+   time. It receives no action identifiers, rationale, PF recovery material, evidence, administrator,
+   or response capability.
+
 ### Cloud SOC path
 
 1. A fixed-host endpoint collector signs each request over its method, path, body hash,
    timestamp, and nonce using an encrypted-at-rest collector credential.
 2. The Worker validates and tenant-scopes batches, writes idempotent D1 event records,
-   and enqueues newly accepted event identities.
+   and enqueues newly accepted event identities in bounded groups to control Queue
+   operations without changing event-level detector semantics.
 3. A queue consumer runs deterministic stateless and D1-windowed correlations, then
    creates alerts and cases. At-least-once delivery is absorbed by stable identifiers.
+   A bounded cron reconciliation processes durable unprocessed rows directly from D1;
+   it does not repeatedly re-enqueue the same backlog and amplify Queue operations.
 4. Audit events are HMAC-protected and database triggers make the audit table append-only.
 5. Read-only response actions can be policy-approved. Active or high-impact actions need
    a different approving principal before a signed endpoint agent can retrieve them.
-6. The current endpoint agent supports read-only diagnostics only. Active actions remain
-   unexecutable unless a separately implemented, installed, and field-tested adapter is added;
-   unsupported actions fail closed.
+6. The endpoint agent always supports read-only diagnostics. A separately enabled macOS PF
+   adapter can execute only fixed, signed isolate/release actions with a management allowlist,
+   15-minute maximum, owned state, rollback, and reconciliation. It remains disabled by default;
+   unsupported, expired, or unconfigured actions fail closed.
 
 ## Deliberate trade-offs
 

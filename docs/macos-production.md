@@ -1,5 +1,10 @@
 # macOS production deployment
 
+The current 0.3 collector and local user application package supports Apple Silicon
+(`arm64`) Macs running macOS 13 or later. A universal Intel/Apple Silicon package is not
+yet built or validated. The package builder sets an explicit macOS 13 deployment target
+for both Swift executables and validates the PyInstaller runtime separately.
+
 ControlForge uses the open-source North Pole Security Santa system extension as
 its macOS endpoint telemetry source. Santa is installed from its official,
 signed package; ControlForge does not rebuild or re-sign Santa.
@@ -37,6 +42,32 @@ signed package; ControlForge does not rebuild or re-sign Santa.
 8. Run one collector cycle manually, inspect the cloud event/case/audit record,
    then enable and bootstrap `com.controlforge.agent` with `launchctl`.
 
+For a standalone enrollment, use the packaged root-only `agent-enroll` command instead of
+manually provisioning values. It claims a bound grant, installs the standalone definition,
+stores the fixed Keychain pairs, proves one signed check-in, and only then activates launchd.
+If activation fails after claim, rerun `agent-activate`; do not claim a second grant. Removal is
+confirmation-gated through `agent-uninstall` and preserves spool/logs by default.
+
+For out-of-band containment recovery, use a local root console. The status command exposes only
+the redacted enum and bounded expiry. The release command disables the collector before releasing
+only ControlForge-owned PF state so an approved action cannot immediately reapply while the
+operator is offline:
+
+```bash
+sudo /Library/ControlForge/bin/controlforge agent-containment-status
+sudo /Library/ControlForge/bin/controlforge agent-containment-release \
+  --confirm RELEASE-CONTROLFORGE-CONTAINMENT
+```
+
+Resolve or allow the server action to expire before running `agent-activate` again. Do not replace
+this command with a global PF flush.
+
+The appliance `service-status` report exposes certificate identity, validity bounds, bounded
+days until expiry, and `valid` or `renewal_due`. Health degrades during the final 30 days without
+stopping service. Replace the certificate and matching `0600` private key atomically at their
+configured paths, then restart and rerun `service-status`; browser/OS trust must still be verified
+from an intended admin device.
+
 ## Building the ControlForge PKG
 
 Install the packaging dependency and build:
@@ -62,6 +93,48 @@ submits it with `notarytool`, staples the accepted ticket, and verifies the fina
 package with Gatekeeper. Apple Development identities are suitable for local
 development but do not replace the two Developer ID identities for public
 distribution outside the Mac App Store.
+
+The current 2026-08-24 release candidate is `dist/macos/ControlForge-0.3.0.pkg`, 14,526,455
+bytes, SHA-256 `a80cd724a6202f773074a002e534f78bf9b17c0fb3374606421017d929eacd0a`.
+Apple accepted notarization submission `2ff3b42c-d5a3-44a0-ba09-8c8be2187dfe`; stapling,
+Gatekeeper assessment, strict code-sign checks, expanded-payload inspection, and the bundled
+standalone launcher check passed. The payload includes the exact ten canonical detection rules
+at `/Library/ControlForge/rules` with mode `0644`, so the installed launch daemon does not depend
+on a PyInstaller extraction directory. The signed native app includes redacted status-contract v2
+with enum-only containment posture and bounded expiry while accepting strict legacy v1 status.
+It remains uninstalled pending the separate clean-Mac acceptance matrix; signing and notarization
+do not prove System Keychain ACLs, launchd/reboot behavior, upgrade/rollback, or removal.
+
+## Clean-Mac release exercise
+
+Use the read-only physical verifier before installation and after every lifecycle boundary.
+It emits redacted JSON and never reads Keychain secret values or telemetry rows:
+
+```bash
+source .venv/bin/activate
+python tools/verify_macos_physical_acceptance.py \
+  --phase preinstall \
+  --package dist/macos/ControlForge-0.3.0.pkg \
+  --package-sha256 a80cd724a6202f773074a002e534f78bf9b17c0fb3374606421017d929eacd0a \
+  --output /tmp/controlforge-preinstall.json
+```
+
+Then retain `installed`, `running`, post-reboot `running`, and `uninstalled` reports using
+the same tool. The `installed` report must be captured before enrollment because the package
+intentionally ships launchd disabled. The normal standalone `agent-enroll` command performs
+claim, first signed check-in, and activation as one workflow; use `agent-activate` only to
+resume a post-claim local failure. The transitional `enrolled` verifier phase exists for that
+recovery case.
+
+Alongside those reports, retain the real trusted-TLS URL and hardware-passkey ceremony,
+System Keychain ACL inspection, Santa signal identifiers, admin-workbench case evidence,
+upgrade and rollback results, network-loss recovery, explicit endpoint and appliance-service
+uninstall results, and the two-human PF isolate/explicit-release/automatic-release exercise.
+The physical response exercise must additionally invoke the local containment status/release
+commands from a console, prove that the collector remains disabled, then explicitly reactivate it
+only after the pending action is resolved.
+Re-run `running` after reboot and after upgrade; compare the stable hashed machine fingerprint
+and confirm each report has a fresh timestamp and a completed collector cycle.
 
 ## Organization deployment
 

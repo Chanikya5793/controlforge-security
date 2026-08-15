@@ -29,7 +29,7 @@
 | Ambiguous detector decisions | Every alert records matched fields and reasons |
 | Malformed telemetry | Pydantic validation at CLI/API boundaries |
 | Secret disclosure | Repository contains fixtures only; no vendor credentials are required |
-| Unsafe active response | Active actions require a different approving principal and the current endpoint agent fails closed because no active adapter is installed |
+| Unsafe active response | Active actions require a different approving principal; the exact-device macOS PF adapter is disabled by default, uses fixed arguments and owned state, preserves configured management access, expires within 15 minutes, and rolls back on partial failure |
 | Exposure API key disclosure | Key is read from an environment variable, never accepted as a CLI argument, logged, or persisted |
 | Plaintext breached identity retention | Aliases are SHA-256 hashed immediately; only the digest enters events and alerts |
 | Arbitrary outbound requests | Exposure transport is pinned to the HIBP HTTPS host and validates DNS names before path construction |
@@ -44,14 +44,15 @@
 | Queue redelivery | Stable tenant-scoped identifiers and unique constraints make event and alert writes idempotent |
 | Audit record tampering | Records carry an HMAC and database triggers reject updates and deletes |
 | Autonomous unsafe action | Active and high-impact actions require a different approving principal; unsupported endpoint adapters fail closed |
-| Unsupported response execution | The endpoint collector returns a bounded failure result without changing the host when no separately installed adapter supports the action |
+| Unsupported response execution | The endpoint collector returns a bounded failure result without changing the host when the separately enabled adapter does not support the exact action or cannot validate its owned state |
+| Recurring-alert case flooding | Active cases have a tenant-scoped semantic key derived from rule and device or normalized actor; a partial unique index and transactional link/update aggregate recurrences while closed history remains immutable |
+| Unbounded case detail | Case and evidence projections return exact totals plus bounded newest records and explicit truncation indicators |
 
 ## Production requirements not claimed by this project
 
-- encrypted managed persistence and retention controls;
-- signed vendor webhooks and credential rotation;
-- HA queueing, backpressure, replay, and dead-letter handling;
-- SOC-approved rule promotion and analyst disposition workflows.
+- multi-node standalone high availability, PostgreSQL failover, or enterprise tenant sharding;
+- an off-appliance audit-chain anchor, audit-key rotation ceremony, or immutable external archive;
+- production-scale D1/Queue chaos and long-duration soak evidence for every migration/runtime;
 - field-validated operating-system containment, account resets, or edge blocking. The macOS
   adapter remains disabled until its privileged install and live rollback exercise are verified.
 - autonomous AI severity changes, alert closure, or containment.

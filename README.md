@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-ControlForge is a security-control assurance, detection, and SOC case-management platform. Its Python package provides endpoint assurance, local detection, exposure monitoring, a signed endpoint collector, SQLite audit storage, a CLI, and FastAPI. Its Cloudflare control plane adds authenticated multi-tenant ingestion, D1 persistence, queue-backed correlation, cases, an analyst dashboard, append-only audit records, approval-gated response actions, and optional evidence-bounded model triage.
+ControlForge is a security-control assurance, detection, and SOC case-management platform. Its Python package provides endpoint assurance, local detection, exposure monitoring, a signed endpoint collector, SQLite audit storage, a CLI, and FastAPI. The cloud-independent Standalone runtime adds passkey administration, device enrollment, durable detection jobs, proof-carrying alerts, case disposition, decision replay, HMAC-chained audit verification, encrypted backup/restore, diagnostics, and a CSP-bound web console. Its Cloudflare control plane adds authenticated multi-tenant ingestion, D1 persistence, queue-backed correlation, cases, an analyst dashboard, append-only audit records, approval-gated response actions, and optional evidence-bounded model triage.
 
 It is an engineering portfolio project built with public fixtures plus a live, sanctioned Have I Been Pwned integration. Endpoint-vendor configurations demonstrate extensible control checks; they do **not** imply access to vendor tenants or production customer data. Exposure scans require a domain the operator is authorized to query.
 
@@ -44,8 +44,9 @@ flowchart LR
 - **Evidence-bounded AI triage:** uses schema-constrained Meta Model API or Gemini output to summarize alerts, reference only supplied evidence, treat telemetry as untrusted prompt content, and require human review before any response decision. The deployed Cloudflare runtime selects Meta's contributor tier.
 - **Investigation workflow:** persists normalized events and deduplicated alerts in SQLite, with bounded alert retrieval.
 - **Operational interfaces:** command-line scanning plus a typed FastAPI service with OpenAPI documentation.
-- **Cloud SOC control plane:** a TypeScript Worker uses D1, Queues, a dead-letter queue, tenant scoping, signed collector requests, automatic cases, and a hardened analyst dashboard.
-- **Endpoint collector:** durable SQLite spooling, HMAC-authenticated delivery, replay-resistant requests, macOS System-keychain secrets, bounded Santa JSONL cursors, and structured read-only diagnostic actions.
+- **Standalone SOC appliance kernel:** one-node SQLite/WAL processing with passkey authentication, role-based case work, semantic recurring-alert aggregation, bounded evidence history, replayable decision evidence, encrypted backups, offline-locked restore, bounded diagnostics, and no required external provider.
+- **Cloud SOC control plane:** a TypeScript Worker uses D1, Queues, a dead-letter queue, tenant scoping, signed collector requests, semantic recurring-alert case aggregation, append-only notes and dispositions, audited case transitions, and a responsive analyst workbench.
+- **Endpoint collector and local Mac app:** durable SQLite spooling, HMAC-authenticated delivery, replay-resistant requests, macOS System-keychain secrets, bounded Santa JSONL cursors, structured actions, and a strict redacted status contract. The native app shows protection, delivery, telemetry quality, and enum-only containment posture without exposing credentials, raw events, investigation data, PF recovery material, or response controls.
 - **Response governance:** read-only actions may be policy-approved; active and high-impact changes require a second human principal and a separately installed endpoint adapter.
 - **Safety controls:** read-only endpoint probes, no shell interpolation, bounded input batches, parameterized SQL, non-secret fixtures, static analysis, and dependency-light packaging.
 
@@ -76,6 +77,107 @@ controlforge serve --host 127.0.0.1 --port 8080
 # Set the ControlForge HMAC credential plus the Cloudflare Access service credential.
 # Keep all four values in a secret store; never place them in collector.yml.
 controlforge agent --config config/collector.yml
+```
+
+### Standalone control plane
+
+Install the standalone dependencies, provide a certificate trusted by the admin browser, and
+keep the WebAuthn origin and relying-party identity stable:
+
+```bash
+python -m pip install -e '.[standalone]'
+
+controlforge standalone bootstrap-token \
+  --database /var/lib/controlforge/controlforge.db \
+  --secrets-directory /var/lib/controlforge/secrets \
+  --admin-origin https://localhost:8443 \
+  --rp-id localhost
+
+controlforge standalone serve \
+  --database /var/lib/controlforge/controlforge.db \
+  --secrets-directory /var/lib/controlforge/secrets \
+  --admin-origin https://localhost:8443 \
+  --rp-id localhost \
+  --host 127.0.0.1 --port 8443 \
+  --tls-certificate /path/to/trusted-cert.pem \
+  --tls-private-key /path/to/private-key.pem
+```
+
+For a root-owned appliance installation, the hardened module entry point performs the same
+TLS/schema/secret preflight, creates a rollback-capable encrypted upgrade backup, and installs a
+fixed launchd service without exposing bootstrap values on daemon restarts:
+
+```bash
+sudo python -m controlforge.standalone service-install \
+  --root /Library/ControlForge/appliance \
+  --admin-origin https://controlforge.local:8443 \
+  --rp-id controlforge.local \
+  --host 0.0.0.0 --port 8443 \
+  --tls-certificate /Library/ControlForge/tls/server.crt \
+  --tls-private-key /Library/ControlForge/tls/server.key
+sudo python -m controlforge.standalone service-status \
+  --root /Library/ControlForge/appliance \
+  --admin-origin https://controlforge.local:8443 \
+  --rp-id controlforge.local \
+  --host 0.0.0.0 --port 8443 \
+  --tls-certificate /Library/ControlForge/tls/server.crt \
+  --tls-private-key /Library/ControlForge/tls/server.key
+```
+
+An installed Mac can claim the one-time code without printing its long-lived credential. The
+default host and port match the local standalone service; use a trusted DNS name for a remote
+appliance:
+
+```bash
+sudo /Library/ControlForge/bin/controlforge agent-enroll \
+  --device-id mac-primary \
+  --display-name 'Primary Mac'
+```
+
+The enrollment helper preflights an empty System Keychain pair, installs a standalone collector
+definition atomically, supports bounded same-device retry until first authenticated check-in,
+and never forwards stale Cloudflare Access credentials to the standalone host.
+
+Removal is explicit and fail-closed. Endpoint uninstall preserves the telemetry spool and logs
+unless their separate deletion flags are supplied; appliance service uninstall removes only the
+matching launchd registration and preserves the database, secrets, and backups:
+
+```bash
+sudo /Library/ControlForge/bin/controlforge agent-uninstall \
+  --confirm UNINSTALL-CONTROLFORGE
+sudo python -m controlforge.standalone service-uninstall \
+  --root /Library/ControlForge/appliance \
+  --admin-origin https://controlforge.local:8443 \
+  --rp-id controlforge.local \
+  --host 0.0.0.0 --port 8443 \
+  --tls-certificate /Library/ControlForge/tls/server.crt \
+  --tls-private-key /Library/ControlForge/tls/server.key
+```
+
+If containment must be released from the local console while the network or control plane is
+unavailable, the packaged break-glass path reports only the enum-level posture, then requires an
+exact confirmation. Release disables collector polling before flushing only ControlForge's PF
+anchor and token; resolve or expire the server action before running `agent-activate` again:
+
+```bash
+sudo /Library/ControlForge/bin/controlforge agent-containment-status
+sudo /Library/ControlForge/bin/controlforge agent-containment-release \
+  --confirm RELEASE-CONTROLFORGE-CONTAINMENT
+```
+
+Encrypted operational backups and diagnostics are CLI-accessible while restore requires the
+runtime to be stopped:
+
+```bash
+controlforge standalone backup create \
+  --database /var/lib/controlforge/controlforge.db \
+  --secrets-directory /var/lib/controlforge/secrets \
+  --backup-directory /var/lib/controlforge/backups
+
+controlforge standalone diagnostics \
+  --database /var/lib/controlforge/controlforge.db \
+  --secrets-directory /var/lib/controlforge/secrets \
+  --backup-directory /var/lib/controlforge/backups
 ```
 
 ## API
@@ -149,6 +251,8 @@ The verification target runs:
 - [Production-oriented Cloudflare architecture](docs/production-architecture.md)
 - [Verified Cloudflare deployment evidence](docs/DEPLOYMENT_EVIDENCE.md)
 - [macOS Santa deployment, signing, and notarization](docs/macos-production.md)
+- [Standalone 1.0 implementation plan](docs/STANDALONE_1_0_IMPLEMENTATION_PLAN.md)
+- [Standalone 1.0 acceptance evidence](docs/STANDALONE_1_0_ACCEPTANCE.md)
 
 ## Roadmap
 
@@ -156,7 +260,8 @@ The verification target runs:
 - Full pySigma backend interoperability and rule conversion
 - Signed webhook ingestion and queue-backed processing
 - OpenTelemetry metrics and rule-performance dashboards
-- Analyst dispositions and false-positive feedback loops
+- Broader audit coverage, off-appliance audit anchoring, and scheduled retention operations
+- Trusted-certificate appliance packaging and physical hardware/passkey acceptance
 - Tested operating-system containment adapters and enterprise identity-provider rollout
 
 ## License
