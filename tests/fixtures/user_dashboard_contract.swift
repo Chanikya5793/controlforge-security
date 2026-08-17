@@ -4,7 +4,9 @@ import Foundation
 struct UserDashboardContractHarness {
     static let now = ISO8601DateFormatter().date(from: "2026-08-22T12:00:00Z")!
 
-    static func main() throws {
+    static func main() async throws {
+        try await AccountOnboardingContractHarness.run()
+        try await MacGuidanceContractHarness.run()
         let valid = basePayload()
         let decoded = try AgentStatusDecoder.decode(serialize(valid), now: now)
         guard decoded.deviceId == "device-test-1",
@@ -56,10 +58,34 @@ struct UserDashboardContractHarness {
         expectReject("future timestamp") { payload in
             payload["generated_at"] = "2026-08-22T12:06:00Z"
         }
+        expectReject("support identifier injection") { payload in
+            payload["device_id"] = "mac\nPassword: injected"
+        }
+        expectReject("unbounded version") { payload in
+            payload["agent_version"] = String(repeating: "x", count: 65)
+        }
         expectReject("Santa count exceeds total") { payload in
             var telemetry = payload["telemetry"] as! [String: Any]
             telemetry["santa_events_collected"] = 4
             payload["telemetry"] = telemetry
+        }
+
+        let release = releasePayload()
+        let identity = try ReleaseBuildIdentityDecoder.decode(serialize(release))
+        guard identity.version == "0.4.0",
+              identity.channel == .staging,
+              identity.shortCommit == "440f3cb",
+              identity.sourceLabel == "440f3cb with local changes" else {
+            fatalError("valid release identity did not decode")
+        }
+        expectReleaseReject("extra release metadata") { payload in
+            payload["credential_secret"] = "must-never-be-visible"
+        }
+        expectReleaseReject("dishonest production identity") { payload in
+            payload["channel"] = "production"
+        }
+        expectReleaseReject("untrusted architecture") { payload in
+            payload["architectures"] = ["x86_64"]
         }
     }
 
@@ -100,6 +126,39 @@ struct UserDashboardContractHarness {
         do {
             _ = try AgentStatusDecoder.decode(serialize(payload), now: now)
             fatalError("contract accepted \(label)")
+        } catch {
+            return
+        }
+    }
+
+    static func releasePayload() -> [String: Any] {
+        [
+            "schema_version": "controlforge-macos-build-v1",
+            "product": "ControlForge",
+            "version": "0.4.0",
+            "channel": "staging",
+            "source_commit": "440f3cbfb91b51f19ae7598e4f746f6b6105460f",
+            "source_tag": NSNull(),
+            "source_dirty": true,
+            "account_mode": "account",
+            "account_host": "admin-staging.chanakyachowdary.in",
+            "account_port": 443,
+            "architectures": ["arm64"],
+            "minimum_macos": "13.0",
+            "package_identifier": "com.controlforge.agent",
+            "app_bundle_identifier": "com.controlforge.user",
+        ]
+    }
+
+    static func expectReleaseReject(
+        _ label: String,
+        mutate: (inout [String: Any]) -> Void
+    ) {
+        var payload = releasePayload()
+        mutate(&payload)
+        do {
+            _ = try ReleaseBuildIdentityDecoder.decode(serialize(payload))
+            fatalError("release contract accepted \(label)")
         } catch {
             return
         }

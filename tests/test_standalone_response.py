@@ -218,6 +218,18 @@ def configured_service(
                 """,
                 (tenant_id, user_id, f"{user_id}@example.com", user_id, role, NOW.isoformat()),
             )
+            connection.execute(
+                """INSERT INTO sessions(tenant_id,session_id,user_id,secret_hash,csrf_hash,
+                   created_at,expires_at,last_seen_at) VALUES(?,?,?,'test-only','unused',?,?,?)""",
+                (
+                    tenant_id,
+                    f"session-{user_id}",
+                    user_id,
+                    NOW.isoformat(),
+                    (NOW + timedelta(hours=1)).isoformat(),
+                    NOW.isoformat(),
+                ),
+            )
         for case_id, status in ((CASE_ID, "open"), (CLOSED_CASE_ID, "closed")):
             connection.execute(
                 """

@@ -806,6 +806,107 @@ CREATE UNIQUE INDEX idx_cases_open_semantic
 """
 
 
+NETWORK_ACCOUNTS_SCHEMA = r"""
+CREATE TABLE platform_owners (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    home_tenant_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (home_tenant_id, user_id) REFERENCES users(tenant_id, user_id)
+);
+CREATE TABLE network_namespaces (
+    tenant_id TEXT PRIMARY KEY REFERENCES tenants(tenant_id),
+    login_domain TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE owner_memberships (
+    tenant_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    home_tenant_id TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, user_id),
+    FOREIGN KEY (tenant_id, user_id) REFERENCES users(tenant_id, user_id),
+    FOREIGN KEY (home_tenant_id, user_id) REFERENCES users(tenant_id, user_id)
+);
+CREATE TABLE endpoint_accounts (
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    account_id TEXT NOT NULL,
+    username TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    password_version INTEGER NOT NULL DEFAULT 1,
+    initial_password_expires_at TEXT,
+    setup_completed_at TEXT,
+    status TEXT NOT NULL CHECK (status IN ('active', 'disabled')),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, account_id)
+);
+CREATE TABLE endpoint_sessions (
+    token_hash TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    password_version INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (tenant_id, account_id) REFERENCES endpoint_accounts(tenant_id, account_id)
+);
+CREATE INDEX idx_endpoint_sessions_account ON endpoint_sessions(tenant_id, account_id);
+CREATE TABLE password_reset_requests (
+    request_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolved_by TEXT,
+    FOREIGN KEY (tenant_id, account_id) REFERENCES endpoint_accounts(tenant_id, account_id)
+);
+CREATE UNIQUE INDEX idx_password_reset_open
+    ON password_reset_requests(tenant_id, account_id) WHERE resolved_at IS NULL;
+CREATE TABLE account_enrollment_grants (
+    token_id TEXT PRIMARY KEY REFERENCES enrollment_tokens(token_id),
+    tenant_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    password_version INTEGER NOT NULL,
+    FOREIGN KEY (tenant_id, account_id) REFERENCES endpoint_accounts(tenant_id, account_id)
+);
+CREATE TRIGGER owner_projection_no_passkeys BEFORE INSERT ON passkey_credentials
+WHEN EXISTS (SELECT 1 FROM owner_memberships
+    WHERE tenant_id=NEW.tenant_id AND user_id=NEW.user_id)
+BEGIN
+    SELECT RAISE(ABORT, 'owner projections cannot become login identities');
+END;
+CREATE TRIGGER owner_projection_no_recovery BEFORE INSERT ON recovery_codes
+WHEN EXISTS (SELECT 1 FROM owner_memberships
+    WHERE tenant_id=NEW.tenant_id AND user_id=NEW.user_id)
+BEGIN
+    SELECT RAISE(ABORT, 'owner projections cannot become login identities');
+END;
+"""
+
+
+NETWORK_LIFECYCLE_SCHEMA = r"""
+CREATE TABLE network_revisions (
+    tenant_id TEXT PRIMARY KEY REFERENCES tenants(tenant_id),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0)
+);
+INSERT INTO network_revisions(tenant_id) SELECT tenant_id FROM tenants;
+CREATE TABLE management_revisions (
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    kind TEXT NOT NULL CHECK(kind IN ('user','account')),
+    identity_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision>0),
+    PRIMARY KEY(tenant_id,kind,identity_id)
+);
+"""
+
+
+NETWORK_ROUTING_SCHEMA = r"""
+CREATE TABLE network_routes (
+    tenant_id TEXT PRIMARY KEY REFERENCES network_namespaces(tenant_id),
+    enabled INTEGER NOT NULL CHECK (enabled IN (0,1)),
+    updated_at TEXT NOT NULL
+);
+"""
+
+
 MIGRATIONS = (
     Migration(version=1, name="initial standalone schema", sql=INITIAL_SCHEMA),
     Migration(version=2, name="case workflow and audit hardening", sql=CASE_AUDIT_SCHEMA),
@@ -839,4 +940,9 @@ MIGRATIONS = (
         name="semantic recurring-alert case aggregation",
         sql=SEMANTIC_CASE_AGGREGATION_SCHEMA,
     ),
+    Migration(
+        version=9, name="network ownership and endpoint accounts", sql=NETWORK_ACCOUNTS_SCHEMA
+    ),
+    Migration(version=10, name="revisioned network lifecycle", sql=NETWORK_LIFECYCLE_SCHEMA),
+    Migration(version=11, name="owner controlled network entry routes", sql=NETWORK_ROUTING_SCHEMA),
 )

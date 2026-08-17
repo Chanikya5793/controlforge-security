@@ -8,6 +8,7 @@ import sqlite3
 import stat
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-from controlforge.standalone.__main__ import run
+from controlforge.standalone.__main__ import _launch_config, _parser, run
 from controlforge.standalone.appliance import (
     ApplianceLaunchConfig,
     AppliancePaths,
@@ -197,6 +198,71 @@ def test_clean_install_preflights_and_activates_fixed_daemon(tmp_path: Path) -> 
             ).fetchone()[0]
             == 1
         )
+
+
+@pytest.mark.parametrize("configured", [None, " Accounts.Example.COM "])
+@pytest.mark.parametrize("ingress_mode", ["direct", "cloudflare-tunnel"])
+def test_managed_restart_pins_network_domain_without_shell_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configured: str | None, ingress_mode: str
+) -> None:
+    runner = FakeLaunchdRunner()
+    config = replace(
+        launch_config(tmp_path),
+        admin_origin=(
+            "https://localhost" if ingress_mode == "cloudflare-tunnel" else "https://localhost:8443"
+        ),
+        network_base_domain=configured,
+        ingress_mode=ingress_mode,
+    )
+    service, plist_path = launchd_service(tmp_path, runner, config=config)
+    service.install()
+    payload = plistlib.loads(plist_path.read_bytes())
+    arguments = payload["ProgramArguments"][3:]
+    expected = "accounts.example.com" if configured is not None else None
+    assert config.network_base_domain == expected
+    assert "EnvironmentVariables" not in payload
+    monkeypatch.setenv("CONTROLFORGE_INGRESS_MODE", "untrusted-environment-value")
+    for environment in (None, "different.example.com"):
+        monkeypatch.delenv("CONTROLFORGE_NETWORK_BASE_DOMAIN", raising=False)
+        if environment:
+            monkeypatch.setenv("CONTROLFORGE_NETWORK_BASE_DOMAIN", environment)
+        restarted_config = _launch_config(_parser().parse_args(arguments))
+        assert restarted_config.network_base_domain == expected
+        assert restarted_config.ingress_mode == ingress_mode
+        prepared = StandaloneApplianceLifecycle(restarted_config).prepare_runtime(
+            issue_bootstrap_token=False
+        )
+        try:
+            assert prepared.runtime.database.settings.network_base_domain == expected
+            assert prepared.runtime.database.settings.ingress_mode == ingress_mode
+        finally:
+            prepared.runtime.close()
+
+
+def test_install_captures_validated_environment_domain_and_explicit_flag_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = launch_config(tmp_path)
+    arguments = launch_arguments("service-install", config)
+    monkeypatch.setenv("CONTROLFORGE_NETWORK_BASE_DOMAIN", " Accounts.Example.COM ")
+    parsed = _launch_config(_parser().parse_args(arguments))
+    assert parsed.network_base_domain == "accounts.example.com"
+    explicit = _launch_config(
+        _parser().parse_args([*arguments, "--network-base-domain", "explicit.example.com"])
+    )
+    assert explicit.network_base_domain == "explicit.example.com"
+    monkeypatch.setenv("CONTROLFORGE_NETWORK_BASE_DOMAIN", "https://invalid.example.com")
+    with pytest.raises(ValueError, match="DNS domain"):
+        _launch_config(_parser().parse_args(arguments))
+    assert not config.root.exists()
+
+
+@pytest.mark.parametrize("domain", ["", "*.example.com", "example.com:443", "bad\n--help"])
+def test_invalid_domain_rejected_before_service_actions(tmp_path: Path, domain: str) -> None:
+    config = launch_config(tmp_path)
+    with pytest.raises(ValueError, match="DNS domain"):
+        replace(config, network_base_domain=domain)
+    assert not config.root.exists()
 
 
 def test_install_is_idempotent_without_rotating_bootstrap(tmp_path: Path) -> None:

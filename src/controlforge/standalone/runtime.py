@@ -17,6 +17,7 @@ from controlforge.detections import (
     sigma_rule_digest,
 )
 
+from .accounts import EndpointAccountService
 from .api import StandaloneApiServices, create_standalone_app
 from .audit import StandaloneAuditLog
 from .auth import DeviceHmacAuthenticator
@@ -27,6 +28,7 @@ from .database import StandaloneDatabase
 from .enrollment import AesGcmDeviceCredentialCipher, DeviceEnrollmentService
 from .identity import HumanIdentityService
 from .ingestion import CollectorIngestionService
+from .networks import NetworkService
 from .operations import StandaloneOperationsRepository
 from .passkeys import WebAuthnPasskeyAdapter
 from .presentation import StandalonePresentationRepository
@@ -113,6 +115,8 @@ def _build_locked_runtime(
         audit=audit,
     )
     enrollment = DeviceEnrollmentService(database, credential_cipher)
+    networks = NetworkService(database, identity, audit, config.settings.network_base_domain)
+    accounts = EndpointAccountService(networks, secret_bundle.session_pepper)
     cases = StandaloneCaseService(database, identity, audit)
     device_authenticator = DeviceHmacAuthenticator(database, credential_cipher)
     credential_rotation = DeviceCredentialRotationService(
@@ -156,8 +160,11 @@ def _build_locked_runtime(
             presentation=StandalonePresentationRepository(database),
             retention=StandaloneRetentionService(database, identity, audit),
             credential_rotation=credential_rotation,
+            networks=networks,
+            accounts=accounts,
         ),
         config.admin_origin,
+        ingress_mode=config.settings.ingress_mode,
     )
     return StandaloneRuntime(app, database, identity, enrollment, supervisor, operation_lock)
 

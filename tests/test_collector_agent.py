@@ -25,7 +25,7 @@ from controlforge.credential_rotation import (
     CredentialRotationMaterial,
     encrypt_rotation_material,
 )
-from controlforge.models import SecurityEvent
+from controlforge.models import ControlFinding, ControlReport, ControlStatus, SecurityEvent
 from controlforge.santa import SantaJsonLogReader, SantaLogDefinition
 
 
@@ -301,6 +301,86 @@ def test_spool_retries_without_persisting_credentials(tmp_path) -> None:  # type
     assert spool.pending() == []
 
 
+def test_status_v3_projects_real_component_failures_without_private_evidence(
+    project_root, tmp_path, monkeypatch
+):
+    config = definition(project_root, tmp_path).model_copy(update={"action_polling_enabled": False})
+    secret = "s" * 48
+    transport = FixtureTransport(secret, {("POST", "/v1/ingest/events"): (202, b'{"accepted":4}')})
+    agent = EndpointCollectorAgent(
+        config,
+        SignedControlForgeClient(
+            config, "3970e11f-f87c-4e14-9a90-d574cd2bcd95", secret, transport=transport
+        ),
+    )
+    report = ControlReport(
+        hostname="synthetic",
+        platform="darwin",
+        findings=[
+            ControlFinding(
+                agent_id=f"component-{index}",
+                display_name="PRIVATE-COMPONENT-NAME",
+                status=status,
+                installed=installed,
+                running=running,
+                evidence=["PRIVATE-PATH-AND-PROCESS"],
+                recommended_action="PRIVATE-RECOMMENDATION",
+            )
+            for index, (status, installed, running) in enumerate(
+                [
+                    (ControlStatus.HEALTHY, True, True),
+                    (ControlStatus.DEGRADED, True, True),
+                    (ControlStatus.FAILED, False, False),
+                    (ControlStatus.FAILED, True, False),
+                ]
+            )
+        ],
+    )
+    monkeypatch.setattr(agent, "_control_report", lambda: report)
+    agent.run_once()
+    content = config.status_snapshot_path.read_text()
+    snapshot = json.loads(content)
+    assert snapshot["schema_version"] == "controlforge-agent-status-v3"
+    assert snapshot["controls"] == {
+        "evaluated": True,
+        "total": 4,
+        "failed": 2,
+        "degraded": 1,
+        "missing": 1,
+        "not_running": 1,
+    }
+    assert "PRIVATE-" not in content and secret not in content
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"degraded": 4},
+        {"failed": 3, "degraded": 1},
+        {"missing": 2},
+        {"missing": 1, "not_running": 1},
+        {"not_running": -1},
+        {"evaluated": False},
+        {"degraded": None},
+    ],
+)
+def test_status_v3_rejects_inconsistent_component_detail_counts(changes):
+    with pytest.raises(ValueError):
+        AgentControlStatusSummary.model_validate(
+            {
+                "evaluated": True,
+                "total": 3,
+                "failed": 1,
+                "degraded": 0,
+                "missing": 0,
+                "not_running": 0,
+                **changes,
+            }
+        )
+    with pytest.raises(ValueError):
+        AgentControlStatusSummary(evaluated=True, total=1, failed=0)
+
+
 def test_status_store_atomically_replaces_a_strict_redacted_snapshot(tmp_path) -> None:  # type: ignore[no-untyped-def]
     status_path = tmp_path / "status" / "agent-status.json"
     store = AgentStatusSnapshotStore(status_path)
@@ -309,7 +389,9 @@ def test_status_store_atomically_replaces_a_strict_redacted_snapshot(tmp_path) -
         device_id="device-test-1",
         agent_version="0.3.0",
         run_status="completed",
-        controls=AgentControlStatusSummary(evaluated=True, total=3, failed=1),
+        controls=AgentControlStatusSummary(
+            evaluated=True, total=3, failed=1, degraded=0, missing=0, not_running=0
+        ),
         delivery=AgentDeliveryStatusSummary(
             status="backlogged",
             batches_delivered=10,
@@ -327,7 +409,7 @@ def test_status_store_atomically_replaces_a_strict_redacted_snapshot(tmp_path) -
     store.write(first.model_copy(update={"run_status": "completed"}))
 
     stored = json.loads(status_path.read_text(encoding="utf-8"))
-    assert stored["schema_version"] == "controlforge-agent-status-v2"
+    assert stored["schema_version"] == "controlforge-agent-status-v3"
     assert stored["containment"] == {"state": "not_configured", "expires_at": None}
     assert stored["delivery"] == {
         "status": "backlogged",
@@ -407,7 +489,9 @@ def test_status_snapshot_requires_aware_time_and_consistent_telemetry() -> None:
             device_id="device-test-1",
             agent_version="0.3.0",
             run_status="completed",
-            controls=AgentControlStatusSummary(evaluated=True, total=3, failed=0),
+            controls=AgentControlStatusSummary(
+                evaluated=True, total=3, failed=0, degraded=0, missing=0, not_running=0
+            ),
             delivery=AgentDeliveryStatusSummary(
                 status="succeeded",
                 batches_delivered=1,
@@ -741,7 +825,14 @@ def test_agent_fails_closed_for_active_action_without_adapter(project_root, tmp_
         "state": "not_configured",
         "expires_at": None,
     }
-    assert set(status_payload["controls"]) == {"evaluated", "total", "failed"}
+    assert set(status_payload["controls"]) == {
+        "evaluated",
+        "total",
+        "failed",
+        "degraded",
+        "missing",
+        "not_running",
+    }
     assert set(status_payload["delivery"]) == {
         "status",
         "batches_delivered",

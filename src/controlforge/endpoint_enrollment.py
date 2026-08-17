@@ -34,6 +34,13 @@ class EndpointEnrollmentResult(BaseModel):
     expires_at: AwareDatetime
 
 
+class AccountEndpointEnrollmentResult(EndpointEnrollmentResult):
+    """Opt-in account identity returned to the privileged enroller, never the UI."""
+
+    account_id: str = Field(min_length=1, max_length=128)
+    network_name: str = Field(min_length=1, max_length=120)
+
+
 class EnrollmentTransport(Protocol):
     def claim(
         self,
@@ -85,6 +92,7 @@ class StandaloneEndpointEnrollmentClient:
         api_port: int = 8443,
         transport: Optional[EnrollmentTransport] = None,
         timeout_seconds: float = 15.0,
+        account_context: bool = False,
     ) -> None:
         # Reuse the collector's pinned-host contract rather than accepting a URL,
         # scheme, path, credentials, or caller-selected TLS behavior.
@@ -99,6 +107,7 @@ class StandaloneEndpointEnrollmentClient:
         self._api_port = api_port
         self._transport = transport or FixedHostEnrollmentTransport()
         self._timeout_seconds = timeout_seconds
+        self._account_context = account_context
 
     def claim(
         self,
@@ -117,13 +126,16 @@ class StandaloneEndpointEnrollmentClient:
             raise ValueError("device display name must contain between 1 and 100 characters")
         if len(token) < 32 or len(token) > 128:
             raise EndpointEnrollmentError("enrollment grant is invalid")
+        request_payload: dict[str, object] = {
+            "device_id": definition.device_id,
+            "display_name": normalized_name,
+            "platform": "macos",
+            "token": token,
+        }
+        if self._account_context:
+            request_payload["include_account_context"] = True
         body = json.dumps(
-            {
-                "device_id": definition.device_id,
-                "display_name": normalized_name,
-                "platform": "macos",
-                "token": token,
-            },
+            request_payload,
             separators=(",", ":"),
             sort_keys=True,
         ).encode()
@@ -143,7 +155,12 @@ class StandaloneEndpointEnrollmentClient:
                 f"standalone appliance enrollment failed with HTTP {status}"
             )
         try:
-            result = EndpointEnrollmentResult.model_validate_json(payload)
+            model = (
+                AccountEndpointEnrollmentResult
+                if self._account_context
+                else EndpointEnrollmentResult
+            )
+            result = model.model_validate_json(payload)
             uuid.UUID(result.credential_id)
         except (ValidationError, ValueError) as exc:
             raise EndpointEnrollmentError(

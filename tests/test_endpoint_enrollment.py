@@ -102,6 +102,22 @@ def test_host_token_and_name_are_validated_before_network() -> None:
     assert transport.calls == []
 
 
+def test_account_context_is_explicit_and_legacy_shape_is_preserved() -> None:
+    payload = {**valid_payload(), "account_id": "alex", "network_name": "Alpha School"}
+    transport = FixtureEnrollmentTransport(201, payload)
+    result = StandaloneEndpointEnrollmentClient(
+        "standalone.example.com", transport=transport, account_context=True
+    ).claim("t" * 43, "mac-primary", "Primary Mac")
+    assert result.model_dump()["account_id"] == "alex"
+    assert json.loads(transport.calls[0][2])["include_account_context"] is True
+    with pytest.raises(EndpointEnrollmentError, match="invalid credentials"):
+        StandaloneEndpointEnrollmentClient(
+            "standalone.example.com",
+            transport=FixtureEnrollmentTransport(201, valid_payload()),
+            account_context=True,
+        ).claim("t" * 43, "mac-primary", "Primary Mac")
+
+
 def test_install_definition_preserves_paths_and_disables_cloud_access(
     tmp_path: Path,
 ) -> None:

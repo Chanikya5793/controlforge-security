@@ -540,6 +540,30 @@ def test_uninstall_preserves_spool_and_logs_by_default(tmp_path: Path) -> None:
     assert not paths["app"].exists()
 
 
+def test_uninstall_removes_only_owned_account_metadata(tmp_path: Path) -> None:
+    runner = RecordingRunner({(LAUNCHCTL, "print", LAUNCHD_LABEL): [1]})
+    service, paths, _ = uninstall_lifecycle(tmp_path, runner)
+    profile = paths["status"].parent / "account-server.json"
+    membership = paths["status"].parent / "network-membership.json"
+    lock = paths["config"].parent / "account-enrollment.lock"
+    defaults = paths["status"].parent.parent / "installer/account-server.default.json"
+    defaults.parent.mkdir()
+    for path, mode in [(profile, 0o644), (membership, 0o644), (lock, 0o600), (defaults, 0o644)]:
+        path.write_text("{}", encoding="utf-8")
+        path.chmod(mode)
+    unrelated = paths["status"].parent / "operator-notes.json"
+    unrelated.write_text("preserve", encoding="utf-8")
+    result = service.uninstall(confirmation=UNINSTALL_CONFIRMATION)
+    assert {
+        "account_server",
+        "network_membership",
+        "account_enrollment_lock",
+        "account_installer_defaults",
+    }.issubset(result.removed)
+    assert all(not path.exists() for path in [profile, membership, lock, defaults])
+    assert unrelated.read_text() == "preserve"
+
+
 def test_uninstall_deletes_only_explicit_spool_and_log_files_when_confirmed(
     tmp_path: Path,
 ) -> None:

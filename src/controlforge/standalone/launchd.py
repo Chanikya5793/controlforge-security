@@ -369,6 +369,10 @@ class StandaloneLaunchdService:
             str(self.config.bootstrap_ttl_seconds),
             "--managed-service",
         ]
+        if self.config.network_base_domain is not None:
+            arguments.extend(["--network-base-domain", self.config.network_base_domain])
+        if self.config.ingress_mode != "direct":
+            arguments.extend(["--ingress-mode", self.config.ingress_mode])
         payload = {
             "Disabled": True,
             "KeepAlive": {"SuccessfulExit": False},

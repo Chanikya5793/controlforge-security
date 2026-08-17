@@ -102,7 +102,7 @@ def launch_config(
     )
 
 
-def create_v1_appliance(config: ApplianceLaunchConfig) -> AppliancePaths:
+def create_v1_appliance(config: ApplianceLaunchConfig, tenant_count: int = 1) -> AppliancePaths:
     paths = AppliancePaths.from_root(config.root)
     for directory in (
         paths.root,
@@ -135,6 +135,12 @@ def create_v1_appliance(config: ApplianceLaunchConfig) -> AppliancePaths:
             """,
             (TENANT_ID, NOW.isoformat()),
         )
+        for index in range(1, tenant_count):
+            connection.execute(
+                """INSERT INTO tenants(tenant_id, slug, display_name, status, created_at)
+                   VALUES (?, ?, 'Another private network', 'active', ?)""",
+                (f"network-{index}", f"network-{index}", NOW.isoformat()),
+            )
         connection.commit()
     finally:
         connection.close()
@@ -202,6 +208,7 @@ def test_one_command_provisions_and_serves_without_external_provider(
             "port": 8443,
             "ssl_certfile": str(config.tls_certificate),
             "ssl_keyfile": str(config.tls_private_key),
+            "proxy_headers": False,
         }
     ]
     for directory in (
@@ -232,6 +239,21 @@ def test_tls_origin_identity_and_private_key_fail_closed(tmp_path: Path) -> None
     )
     with pytest.raises(AppliancePreflightError, match="port does not match"):
         StandaloneApplianceLifecycle(wrong_origin).preflight(NOW)
+
+    tunnel_origin = replace(
+        launch_config(tmp_path / "tunnel-origin"),
+        admin_origin="https://localhost",
+        ingress_mode="cloudflare-tunnel",
+    )
+    schema, tls = StandaloneApplianceLifecycle(tunnel_origin).preflight(NOW)
+    assert schema.state == "clean_install" and tls.hostname == "localhost"
+
+    tunnel_nonstandard_origin = replace(
+        tunnel_origin,
+        admin_origin="https://localhost:9443",
+    )
+    with pytest.raises(AppliancePreflightError, match="public HTTPS port 443"):
+        StandaloneApplianceLifecycle(tunnel_nonstandard_origin).preflight(NOW)
 
     key_source = launch_config(tmp_path / "key-source")
     mismatched = replace(
@@ -318,9 +340,12 @@ def test_restart_rotates_unfinished_bootstrap_to_one_active_token(tmp_path: Path
         second.runtime.close()
 
 
-def test_upgrade_creates_encrypted_rollback_and_explicit_restore(tmp_path: Path) -> None:
+@pytest.mark.parametrize("tenant_count", [1, 3])
+def test_upgrade_creates_encrypted_rollback_and_explicit_restore(
+    tmp_path: Path, tenant_count: int
+) -> None:
     config = launch_config(tmp_path)
-    paths = create_v1_appliance(config)
+    paths = create_v1_appliance(config, tenant_count)
     lifecycle = StandaloneApplianceLifecycle(config)
 
     prepared = lifecycle.prepare_runtime(NOW, issue_bootstrap_token=False)
@@ -333,6 +358,7 @@ def test_upgrade_creates_encrypted_rollback_and_explicit_restore(tmp_path: Path)
         artifact = paths.backup_directory / backup_filename
         assert artifact.read_bytes().startswith(b"CFBACKUP\x01\n")
         assert b"Upgrade Fixture" not in artifact.read_bytes()
+        assert b"Another private network" not in artifact.read_bytes()
         with prepared.runtime.database.connect() as connection:
             state = json.loads(
                 connection.execute(
@@ -364,19 +390,22 @@ def test_upgrade_creates_encrypted_rollback_and_explicit_restore(tmp_path: Path)
                 "SELECT version FROM schema_migrations ORDER BY version"
             ).fetchall()
         )
-        tenant = connection.execute("SELECT tenant_id FROM tenants").fetchone()[0]
+        tenants = [row[0] for row in connection.execute("SELECT tenant_id FROM tenants ORDER BY 1")]
     finally:
         connection.close()
     assert versions == (1,)
-    assert tenant == TENANT_ID
+    assert tenants == [TENANT_ID, *[f"network-{index}" for index in range(1, tenant_count)]]
 
 
-def test_failed_upgrade_automatically_restores_preupgrade_database(tmp_path: Path) -> None:
+@pytest.mark.parametrize("tenant_count", [1, 3])
+def test_failed_upgrade_automatically_restores_preupgrade_database(
+    tmp_path: Path, tenant_count: int
+) -> None:
     invalid_rules = tmp_path / "invalid-rules"
     invalid_rules.mkdir()
     (invalid_rules / "invalid.yml").write_text("not: [a valid rule")
     config = launch_config(tmp_path, rules_directory=invalid_rules)
-    paths = create_v1_appliance(config)
+    paths = create_v1_appliance(config, tenant_count)
 
     with pytest.raises(AppliancePreflightError, match="runtime preparation failed"):
         StandaloneApplianceLifecycle(config).prepare_runtime(
@@ -392,9 +421,11 @@ def test_failed_upgrade_automatically_restores_preupgrade_database(tmp_path: Pat
                 "SELECT version FROM schema_migrations ORDER BY version"
             ).fetchall()
         )
+        tenants = [row[0] for row in connection.execute("SELECT tenant_id FROM tenants ORDER BY 1")]
     finally:
         connection.close()
     assert versions == (1,)
+    assert tenants == [TENANT_ID, *[f"network-{index}" for index in range(1, tenant_count)]]
     assert len(list(paths.backup_directory.glob("*.cfbackup"))) == 1
 
 
@@ -428,6 +459,17 @@ def test_newer_or_gapped_schema_is_rejected_without_mutation(tmp_path: Path) -> 
             ]
             == "future schema"
         )
+
+
+def test_network_limit_is_checked_before_upgrade_or_backup(tmp_path: Path) -> None:
+    config = launch_config(tmp_path)
+    paths = create_v1_appliance(config, 201)
+    with pytest.raises(AppliancePreflightError, match="200-network limit"):
+        StandaloneApplianceLifecycle(config).prepare_runtime(NOW)
+    assert list(paths.backup_directory.iterdir()) == []
+    with sqlite3.connect(paths.database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM tenants").fetchone()[0] == 201
+        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 1
 
 
 def test_schema_name_mismatch_is_rejected_before_upgrade(tmp_path: Path) -> None:

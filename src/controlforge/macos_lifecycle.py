@@ -482,6 +482,25 @@ class MacOSEndpointLifecycle:
             ("default_config", self._collector_default_config, False, 0o644),
             ("controls_config", self._controls_config, False, 0o644),
             ("status_snapshot", self._status_snapshot, False, 0o644),
+            ("account_server", self._status_snapshot.parent / "account-server.json", False, 0o644),
+            (
+                "account_installer_defaults",
+                self._status_snapshot.parent.parent / "installer/account-server.default.json",
+                False,
+                0o644,
+            ),
+            (
+                "network_membership",
+                self._status_snapshot.parent / "network-membership.json",
+                False,
+                0o644,
+            ),
+            (
+                "account_enrollment_lock",
+                self._collector_config.parent / "account-enrollment.lock",
+                False,
+                0o600,
+            ),
             ("pf_recovery_state", self._response_state, False, 0o600),
         ]
         files.extend(
@@ -501,6 +520,13 @@ class MacOSEndpointLifecycle:
         return (
             ("launch_daemon", self._launchd_plist),
             ("status_snapshot", self._status_snapshot),
+            ("account_server", self._status_snapshot.parent / "account-server.json"),
+            (
+                "account_installer_defaults",
+                self._status_snapshot.parent.parent / "installer/account-server.default.json",
+            ),
+            ("network_membership", self._status_snapshot.parent / "network-membership.json"),
+            ("account_enrollment_lock", self._collector_config.parent / "account-enrollment.lock"),
             ("controls_config", self._controls_config),
             ("default_config", self._collector_default_config),
             *(

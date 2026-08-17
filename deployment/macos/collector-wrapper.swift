@@ -242,6 +242,25 @@ func requireCredentialPairEmpty() -> Never {
     exit(0)
 }
 
+func reportEnrollmentState() -> Never {
+    guard geteuid() == 0 else {
+        exit(77)
+    }
+    let keychain = openSystemKeychain()
+    var present = false
+    for account in allowedAccounts.sorted() {
+        // Metadata lookup only: findKeychainItem supplies nil password outputs.
+        let (status, _) = findKeychainItem(keychain, account: account)
+        if status == errSecSuccess {
+            present = true
+        } else if status != errSecItemNotFound {
+            exit(74)
+        }
+    }
+    print(present ? "present" : "empty")
+    exit(0)
+}
+
 func deleteAllKeychainAccounts() -> Never {
     guard geteuid() == 0 else {
         exit(77)
@@ -346,6 +365,12 @@ if arguments.first == "keychain-require-empty" {
         exit(64)
     }
     requireCredentialPairEmpty()
+}
+if arguments.first == "keychain-enrollment-state" {
+    guard arguments.count == 1 else {
+        exit(64)
+    }
+    reportEnrollmentState()
 }
 if arguments.first == "keychain-delete-all" {
     guard arguments.count == 1 else {

@@ -23,7 +23,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from controlforge import __version__
 
@@ -56,9 +56,10 @@ class BackupManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     format: Literal["controlforge-standalone-backup"]
-    format_version: Literal[1]
+    format_version: Literal[1, 2]
     backup_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
     tenant_id: str = Field(min_length=1, max_length=128)
+    tenant_ids: list[str] = Field(default_factory=list, max_length=200)
     created_at: datetime
     application_version: str = Field(min_length=1, max_length=64)
     schema_versions: list[int] = Field(min_length=1, max_length=1_000)
@@ -70,11 +71,30 @@ class BackupManifest(BaseModel):
     salt: str = Field(min_length=43, max_length=44)
     nonce: str = Field(min_length=16, max_length=16)
 
+    @model_validator(mode="after")
+    def validate_scope(self) -> BackupManifest:
+        if self.format_version == 1:
+            if self.tenant_ids:
+                raise ValueError("legacy backups cannot declare a multi-network scope")
+        elif (
+            not self.tenant_ids
+            or self.tenant_ids != sorted(set(self.tenant_ids))
+            or self.tenant_id not in self.tenant_ids
+            or any(not value or len(value) > 128 for value in self.tenant_ids)
+        ):
+            raise ValueError("backup network inventory is invalid")
+        return self
+
+    @property
+    def network_ids(self) -> tuple[str, ...]:
+        return tuple(self.tenant_ids) if self.format_version == 2 else (self.tenant_id,)
+
 
 @dataclass(frozen=True)
 class BackupInventoryEntry:
     backup_id: str
     tenant_id: str
+    tenant_ids: tuple[str, ...]
     created_at: datetime
     filename: str
     artifact_sha256: str
@@ -166,7 +186,7 @@ class ApplianceOperationLock:
 
 
 class StandaloneBackupService:
-    """Manage encrypted, authenticated backups for one standalone organization."""
+    """Operator-only whole-appliance backup; never a tenant-scoped export."""
 
     def __init__(
         self,
@@ -204,30 +224,41 @@ class StandaloneBackupService:
         tenant_id: Optional[str] = None,
         now: Optional[datetime] = None,
     ) -> BackupInventoryEntry:
+        with ApplianceOperationLock(self._database.settings.database_path).shared():
+            return self._create_backup(tenant_id, now)
+
+    def _create_backup(
+        self, tenant_id: Optional[str], now: Optional[datetime]
+    ) -> BackupInventoryEntry:
         created_at = _utc_now() if now is None else _require_utc(now)
-        selected_tenant = self._single_tenant_id(tenant_id)
+        selected_tenant = self._history_tenant_id(tenant_id)
         backup_id = str(uuid.uuid4())
         filename = f"controlforge-{created_at.strftime('%Y%m%dT%H%M%SZ')}-{backup_id}.cfbackup"
         destination = self._backup_directory / filename
-        self._record_started(backup_id, selected_tenant, filename, created_at)
         try:
-            with (
-                ApplianceOperationLock(self._database.settings.database_path).shared(),
-                tempfile.TemporaryDirectory(
-                    prefix=".controlforge-snapshot-", dir=self._backup_directory
-                ) as temporary_directory,
-            ):
+            self._record_started(backup_id, selected_tenant, filename, created_at)
+            with tempfile.TemporaryDirectory(
+                prefix=".controlforge-snapshot-", dir=self._backup_directory
+            ) as temporary_directory:
                 snapshot = Path(temporary_directory) / "database.sqlite3"
                 self._snapshot_database(snapshot)
-                schema_versions = self._verify_database(snapshot, selected_tenant)
+                # Scope is taken from the consistent snapshot, not a pre-snapshot
+                # live query that can race with owner network creation.
+                tenant_ids = self._snapshot_tenant_ids(snapshot)
+                if tenant_id is not None and tenant_ids != (tenant_id,):
+                    raise BackupError("tenant-scoped export is not supported by appliance backups")
+                schema_versions = self._verify_database(
+                    snapshot, tenant_ids, history=(backup_id, selected_tenant)
+                )
                 database_sha256, database_size = _sha256_file(snapshot)
                 salt = os.urandom(_SALT_BYTES)
                 nonce = os.urandom(_NONCE_BYTES)
                 manifest = BackupManifest(
                     format="controlforge-standalone-backup",
-                    format_version=1,
+                    format_version=2 if len(tenant_ids) > 1 else 1,
                     backup_id=backup_id,
                     tenant_id=selected_tenant,
+                    tenant_ids=list(tenant_ids) if len(tenant_ids) > 1 else [],
                     created_at=created_at,
                     application_version=__version__,
                     schema_versions=list(schema_versions),
@@ -251,6 +282,7 @@ class StandaloneBackupService:
             return BackupInventoryEntry(
                 backup_id=backup_id,
                 tenant_id=selected_tenant,
+                tenant_ids=tenant_ids,
                 created_at=created_at,
                 filename=filename,
                 artifact_sha256=artifact_sha256,
@@ -274,13 +306,16 @@ class StandaloneBackupService:
         ) as temporary_directory:
             plaintext = Path(temporary_directory) / "database.sqlite3"
             manifest = self._decrypt_artifact(artifact, plaintext)
-            schema_versions = self._verify_database(plaintext, manifest.tenant_id)
+            schema_versions = self._verify_database(
+                plaintext, manifest.network_ids, history=(manifest.backup_id, manifest.tenant_id)
+            )
             if tuple(manifest.schema_versions) != schema_versions:
                 raise BackupError("backup schema manifest does not match the database")
         artifact_sha256, artifact_size = _sha256_file(artifact)
         return BackupInventoryEntry(
             backup_id=manifest.backup_id,
             tenant_id=manifest.tenant_id,
+            tenant_ids=manifest.network_ids,
             created_at=manifest.created_at,
             filename=artifact.name,
             artifact_sha256=artifact_sha256,
@@ -339,18 +374,24 @@ class StandaloneBackupService:
             temporary_path = Path(temporary_name)
             try:
                 manifest = self._decrypt_artifact(artifact, temporary_path)
-                schema_versions = self._verify_database(temporary_path, manifest.tenant_id)
+                schema_versions = self._verify_database(
+                    temporary_path,
+                    manifest.network_ids,
+                    history=(manifest.backup_id, manifest.tenant_id),
+                )
                 if tuple(manifest.schema_versions) != schema_versions:
                     raise BackupError("backup schema manifest does not match the database")
                 latest_supported = max(migration.version for migration in MIGRATIONS)
                 if max(schema_versions) > latest_supported:
                     raise BackupError("backup schema is newer than this ControlForge version")
-                self._validate_restore_tenant(manifest.tenant_id)
+                self._validate_restore_tenant(manifest.network_ids)
                 self._checkpoint_live_database()
                 temporary_path.chmod(0o600)
                 os.replace(temporary_path, target)
                 _fsync_directory(target.parent)
-                restored_versions = self._verify_database(target, manifest.tenant_id)
+                restored_versions = self._verify_database(
+                    target, manifest.network_ids, history=(manifest.backup_id, manifest.tenant_id)
+                )
                 if restored_versions != schema_versions:
                     raise BackupError("restored database verification failed")
                 self._record_restored(manifest.backup_id, restored_at)
@@ -365,15 +406,41 @@ class StandaloneBackupService:
             finally:
                 temporary_path.unlink(missing_ok=True)
 
-    def _single_tenant_id(self, requested: Optional[str]) -> str:
+    def _history_tenant_id(self, requested: Optional[str]) -> str:
         with self._database.connect() as connection:
-            rows = connection.execute("SELECT tenant_id FROM tenants ORDER BY tenant_id").fetchall()
+            rows = connection.execute(
+                "SELECT tenant_id FROM tenants ORDER BY tenant_id LIMIT 201"
+            ).fetchall()
+            owner = None
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_owners'"
+            ).fetchone():
+                owner = connection.execute("SELECT home_tenant_id FROM platform_owners").fetchone()
         tenant_ids = [str(row["tenant_id"]) for row in rows]
-        if len(tenant_ids) != 1:
-            raise BackupError("appliance backup requires exactly one configured tenant")
+        if not 1 <= len(tenant_ids) <= 200:
+            raise BackupError("appliance backup requires between 1 and 200 configured networks")
+        if requested is not None and len(tenant_ids) != 1:
+            raise BackupError("tenant-scoped export is not supported by appliance backups")
         if requested is not None and requested != tenant_ids[0]:
             raise BackupError("requested tenant does not match the standalone appliance")
-        return tenant_ids[0]
+        return str(owner[0]) if owner is not None else tenant_ids[0]
+
+    @staticmethod
+    def _snapshot_tenant_ids(path: Path) -> tuple[str, ...]:
+        try:
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute("PRAGMA query_only = ON")
+                rows = connection.execute(
+                    "SELECT tenant_id FROM tenants ORDER BY tenant_id LIMIT 201"
+                ).fetchall()
+            finally:
+                connection.close()
+        except sqlite3.Error as exc:
+            raise BackupError("snapshot network inventory could not be verified") from exc
+        if not 1 <= len(rows) <= 200:
+            raise BackupError("appliance backup requires between 1 and 200 configured networks")
+        return tuple(str(row[0]) for row in rows)
 
     def _snapshot_database(self, destination: Path) -> None:
         try:
@@ -390,7 +457,9 @@ class StandaloneBackupService:
     def _verify_database(
         self,
         path: Path,
-        expected_tenant_id: str,
+        expected_tenant_ids: tuple[str, ...],
+        *,
+        history: tuple[str, str],
     ) -> tuple[int, ...]:
         try:
             connection = sqlite3.connect(path)
@@ -405,8 +474,13 @@ class StandaloneBackupService:
                     "SELECT version FROM schema_migrations ORDER BY version"
                 ).fetchall()
                 tenant_rows = connection.execute(
-                    "SELECT tenant_id FROM tenants ORDER BY tenant_id"
+                    "SELECT tenant_id FROM tenants ORDER BY tenant_id LIMIT 201"
                 ).fetchall()
+                history_row = connection.execute(
+                    "SELECT tenant_id FROM backup_history WHERE backup_id = ?", (history[0],)
+                ).fetchone()
+                if history_row is None or str(history_row[0]) != history[1]:
+                    raise BackupError("backup history manifest does not match the database")
             finally:
                 connection.close()
         except sqlite3.Error as exc:
@@ -418,23 +492,23 @@ class StandaloneBackupService:
         if versions != supported_versions[: len(versions)]:
             raise BackupError("database schema migration ledger is unsupported")
         tenant_ids = tuple(str(row[0]) for row in tenant_rows)
-        if tenant_ids != (expected_tenant_id,):
+        if tenant_ids != expected_tenant_ids:
             raise BackupError("backup tenant manifest does not match the database")
         return versions
 
-    def _validate_restore_tenant(self, expected_tenant_id: str) -> None:
+    def _validate_restore_tenant(self, expected_tenant_ids: tuple[str, ...]) -> None:
         target = self._database.settings.database_path
         if not target.exists():
             return
         try:
             with self._database.connect() as connection:
                 rows = connection.execute(
-                    "SELECT tenant_id FROM tenants ORDER BY tenant_id"
+                    "SELECT tenant_id FROM tenants ORDER BY tenant_id LIMIT 201"
                 ).fetchall()
         except sqlite3.Error as exc:
             raise BackupError("live appliance tenant could not be verified") from exc
         tenant_ids = tuple(str(row[0]) for row in rows)
-        if tenant_ids and tenant_ids != (expected_tenant_id,):
+        if tenant_ids and tenant_ids != expected_tenant_ids:
             raise BackupError("backup tenant does not match the live appliance")
 
     def _encrypt_snapshot(
@@ -650,7 +724,7 @@ def _derive_key(source_key: bytes, salt: bytes) -> bytes:
 
 def _manifest_bytes(manifest: BackupManifest) -> bytes:
     return json.dumps(
-        manifest.model_dump(mode="json"),
+        manifest.model_dump(mode="json", exclude_defaults=True),
         ensure_ascii=True,
         separators=(",", ":"),
         sort_keys=True,

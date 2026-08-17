@@ -35,6 +35,8 @@ from .endpoint_enrollment import (
     standalone_collector_definition,
 )
 from .exposure import ExposureService, HibpClient, HibpError
+from .macos_account_enrollment import MacAccountEnrollment, MacAccountError
+from .macos_installer import MacInstallerProvisioning
 from .macos_lifecycle import (
     RELEASE_CONTAINMENT_CONFIRMATION,
     UNINSTALL_CONFIRMATION,
@@ -44,10 +46,12 @@ from .macos_lifecycle import (
 from .models import SecurityEvent
 from .probes import LocalSystemProbe
 from .service import DetectionService
+from .standalone.audit import StandaloneAuditLog
 from .standalone.backup import BackupError, StandaloneBackupService
 from .standalone.database import StandaloneDatabase, StandaloneDatabaseSecurityError
 from .standalone.diagnostics import StandaloneDiagnosticsService
 from .standalone.identity import BootstrapError
+from .standalone.ownership import OWNER_CONFIRMATION, PlatformOwnerSetup, require_operator_directory
 from .standalone.runtime import (
     StandaloneRuntime,
     StandaloneRuntimeConfig,
@@ -191,6 +195,26 @@ def _build_parser() -> argparse.ArgumentParser:
     agent_enroll.add_argument("--display-name", required=True)
     agent_enroll.add_argument("--token-stdin", action="store_true", help=argparse.SUPPRESS)
 
+    account_server = subcommands.add_parser(
+        "agent-configure-account-server",
+        help="set the trusted account server for an unenrolled Mac",
+    )
+    account_server.add_argument("--api-host", required=True)
+    account_server.add_argument("--api-port", type=int, default=443)
+    subcommands.add_parser(
+        "agent-provision-account-server",
+        help="apply installed package defaults without replacing an existing connection",
+    )
+    account_enroll = subcommands.add_parser(
+        "agent-enroll-app", help="consume the Mac app's one-time enrollment handoff"
+    )
+    account_enroll.add_argument("--request-uid", type=int, required=True)
+    account_enroll.add_argument("--request-sha256", required=True)
+    finish_account = subcommands.add_parser(
+        "agent-finish-account-enrollment", help="finish a previously claimed account enrollment"
+    )
+    finish_account.add_argument("--request-uid", type=int, required=True)
+
     agent_activate = subcommands.add_parser(
         "agent-activate",
         help="verify first check-in and activate the installed macOS launch daemon",
@@ -272,6 +296,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     add_standalone_paths(standalone_serve)
     standalone_serve.add_argument("--host", default="127.0.0.1")
+    standalone_serve.add_argument(
+        "--ingress-mode", choices=("direct", "cloudflare-tunnel"), default="direct"
+    )
     standalone_serve.add_argument("--port", type=int, default=8443)
     standalone_serve.add_argument("--tls-certificate", type=Path, required=True)
     standalone_serve.add_argument("--tls-private-key", type=Path, required=True)
@@ -281,6 +308,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="print one expiring first-administrator token to this console",
     )
     add_standalone_paths(standalone_bootstrap)
+
+    owner = standalone_commands.add_parser(
+        "owner", help="inspect or designate the existing appliance owner locally"
+    )
+    owner_commands = owner.add_subparsers(dest="owner_command", required=True)
+    owner_status = owner_commands.add_parser(
+        "status", help="list the designated owner and eligible existing admins"
+    )
+    owner_designate = owner_commands.add_parser(
+        "designate", help="designate one existing admin while the runtime is stopped"
+    )
+    for owner_command in (owner_status, owner_designate):
+        owner_command.add_argument("--database", type=Path, required=True)
+        owner_command.add_argument("--secrets-directory", type=Path, required=True)
+    owner_designate.add_argument("--tenant-id", required=True)
+    owner_designate.add_argument("--user-id", required=True)
+    owner_designate.add_argument("--confirm", required=True, choices=[OWNER_CONFIRMATION])
 
     def add_backup_paths(command: argparse.ArgumentParser) -> None:
         command.add_argument(
@@ -343,12 +387,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _standalone_runtime(args: argparse.Namespace) -> StandaloneRuntime:
+    from .standalone.ingress import validate_ingress_listener
+
+    ingress_mode = getattr(args, "ingress_mode", "direct")
+    validate_ingress_listener(ingress_mode, getattr(args, "host", "127.0.0.1"))
     rules_path = args.rules
     if not rules_path.exists() and rules_path == Path("rules"):
         rules_path = Path(__file__).resolve().parent / "data" / "rules"
     return build_standalone_runtime(
         StandaloneRuntimeConfig(
-            settings=StandaloneSettings(database_path=args.database),
+            settings=StandaloneSettings.from_environment().model_copy(
+                update={"database_path": args.database, "ingress_mode": ingress_mode}
+            ),
             rules_directory=rules_path,
             secret_directory=args.secrets_directory,
             admin_origin=args.admin_origin,
@@ -438,6 +488,35 @@ def run(arguments: Optional[Sequence[str]] = None) -> int:
         _print_json(result)
         return 0
 
+    if args.command in {
+        "agent-configure-account-server",
+        "agent-provision-account-server",
+        "agent-enroll-app",
+        "agent-finish-account-enrollment",
+    }:
+        # Never render Pydantic inputs, transport bodies, or credential-store errors.
+        try:
+            account_enrollment = MacAccountEnrollment()
+            if args.command == "agent-provision-account-server":
+                _print_json(MacInstallerProvisioning(account_enrollment).provision())
+            elif args.command == "agent-configure-account-server":
+                _print_json(account_enrollment.configure_server(args.api_host, args.api_port))
+            elif args.command == "agent-enroll-app":
+                _print_json(
+                    account_enrollment.enroll(
+                        args.request_uid, args.request_sha256, datetime.now(timezone.utc)
+                    )
+                )
+            else:
+                _print_json(account_enrollment.finish_activation(args.request_uid))
+        except MacAccountError:
+            raise
+        except Exception as exc:
+            raise MacAccountError(
+                "account enrollment could not finish; no secret details were printed"
+            ) from exc
+        return 0
+
     if args.command == "agent-enroll":
         current = load_collector_definition(args.config)
         definition = standalone_collector_definition(
@@ -520,6 +599,23 @@ def run(arguments: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command == "standalone":
+        if args.standalone_command == "owner":
+            require_operator_directory(args.database.absolute().parent)
+            require_operator_directory(args.secrets_directory.absolute())
+            bundle = StandaloneSecretBundle.load_existing(args.secrets_directory)
+            database = StandaloneDatabase(
+                StandaloneSettings(database_path=args.database.absolute())
+            )
+            setup = PlatformOwnerSetup(database, StandaloneAuditLog(database, bundle.audit_key))
+            if args.owner_command == "status":
+                _print_json(setup.status())
+            else:
+                _print_json(
+                    setup.designate(
+                        args.tenant_id, args.user_id, args.confirm, datetime.now(timezone.utc)
+                    )
+                )
+            return 0
         if args.standalone_command == "backup":
             backups = _standalone_backup_service(args)
             if args.backup_command == "create":
@@ -555,6 +651,7 @@ def run(arguments: Optional[Sequence[str]] = None) -> int:
                     port=args.port,
                     ssl_certfile=str(args.tls_certificate),
                     ssl_keyfile=str(args.tls_private_key),
+                    proxy_headers=False,
                 )
                 return 0
         finally:
@@ -573,6 +670,7 @@ def main() -> None:
         EndpointEnrollmentError,
         HibpError,
         MacOSEndpointLifecycleError,
+        MacAccountError,
         OSError,
         StandaloneDatabaseSecurityError,
         SecretProvisioningError,

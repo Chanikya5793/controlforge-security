@@ -501,3 +501,53 @@ def test_cli_main_reports_provider_error_without_traceback(monkeypatch, capsys) 
 
     assert exit_info.value.code == 3
     assert capsys.readouterr().err == '{"error": "HIBP request failed with HTTP 401"}\n'
+
+
+@pytest.mark.parametrize(
+    "command,arguments,expected",
+    [
+        ("agent-configure-account-server", ["--api-host", "accounts.example.com"], "profile"),
+        ("agent-enroll-app", ["--request-uid", "501", "--request-sha256", "a" * 64], "enroll"),
+        ("agent-finish-account-enrollment", ["--request-uid", "501"], "finish"),
+    ],
+)
+def test_account_cli_only_dispatches_bounded_operations(
+    monkeypatch, capsys, command, arguments, expected
+):
+    calls = []
+
+    class FixtureAccountEnrollment:
+        def configure_server(self, host, port):
+            calls.append(("profile", host, port))
+            return {"configured": True}
+
+        def enroll(self, uid, digest, now):
+            calls.append(("enroll", uid, digest))
+            assert now.tzinfo is not None
+            return {"activation_state": "reporting"}
+
+        def finish_activation(self, uid):
+            calls.append(("finish", uid))
+            return {"activation_state": "reporting"}
+
+    monkeypatch.setattr(cli, "MacAccountEnrollment", FixtureAccountEnrollment)
+    assert cli.run([command, *arguments]) == 0
+    assert calls[0][0] == expected
+    assert "secret" not in capsys.readouterr().out
+
+
+def test_account_cli_redacts_unexpected_errors(monkeypatch, capsys):
+    class FailingAccountEnrollment:
+        def configure_server(self, host, port):
+            raise ValueError("private-request-body-and-password")
+
+    monkeypatch.setattr(cli, "MacAccountEnrollment", FailingAccountEnrollment)
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        ["controlforge", "agent-configure-account-server", "--api-host", "accounts.example.com"],
+    )
+    with pytest.raises(SystemExit) as result:
+        cli.main()
+    assert result.value.code == 3
+    assert "private-request" not in capsys.readouterr().err

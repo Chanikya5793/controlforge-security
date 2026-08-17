@@ -38,7 +38,7 @@ from .macos_response import (
     MacOSResponseAdapter,
     MacOSResponseError,
 )
-from .models import ControlReport, SecurityEvent
+from .models import ControlReport, ControlStatus, SecurityEvent
 from .probes import LocalSystemProbe
 from .santa import SantaJsonLogReader, SantaLogDefinition, SantaLogError, SourceCursor
 
@@ -186,6 +186,25 @@ class MacOSSystemKeychain:
             raise ValueError(
                 "collector credentials already exist or Keychain preflight failed"
             ) from exc
+
+    def enrollment_state(self) -> Literal["empty", "present"]:
+        """Read fixed-account existence only; never request or return secret values."""
+        if platform.system() != "Darwin" or self._service != "com.controlforge.collector.v2":
+            raise ValueError("collector enrollment state requires the current macOS helper")
+        try:
+            result = subprocess.run(  # noqa: S603  # nosec B603
+                [self._READER, "keychain-enrollment-state"],
+                check=True,
+                capture_output=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            raise ValueError("collector enrollment state is unavailable") from exc
+        if result.stdout == b"empty\n":
+            return "empty"
+        if result.stdout == b"present\n":
+            return "present"
+        raise ValueError("collector enrollment state is invalid")
 
     def replace_pair(
         self,
@@ -343,12 +362,21 @@ class AgentControlStatusSummary(BaseModel):
     evaluated: bool
     total: int = Field(ge=0, le=10_000)
     failed: int = Field(ge=0, le=10_000)
+    degraded: int = Field(ge=0, le=10_000)
+    missing: int = Field(ge=0, le=10_000)
+    not_running: int = Field(ge=0, le=10_000)
 
     @model_validator(mode="after")
     def validate_counts(self) -> AgentControlStatusSummary:
         if self.failed > self.total:
             raise ValueError("failed control count cannot exceed total control count")
-        if not self.evaluated and (self.total != 0 or self.failed != 0):
+        if self.failed + self.degraded > self.total:
+            raise ValueError("failed and degraded counts cannot exceed total control count")
+        if self.missing + self.not_running > self.failed:
+            raise ValueError("missing and stopped counts cannot exceed failed control count")
+        if not self.evaluated and any(
+            (self.total, self.failed, self.degraded, self.missing, self.not_running)
+        ):
             raise ValueError("unevaluated control status must not contain counts")
         return self
 
@@ -421,7 +449,7 @@ class AgentStatusSnapshot(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["controlforge-agent-status-v2"] = "controlforge-agent-status-v2"
+    schema_version: Literal["controlforge-agent-status-v3"] = "controlforge-agent-status-v3"
     generated_at: datetime
     device_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
     agent_version: str = Field(min_length=1, max_length=64)
@@ -1099,6 +1127,21 @@ class EndpointCollectorAgent:
                     evaluated=report is not None,
                     total=len(report.findings) if report is not None else 0,
                     failed=report.failed_count if report is not None else 0,
+                    degraded=report.degraded_count if report is not None else 0,
+                    missing=sum(
+                        finding.status == ControlStatus.FAILED and not finding.installed
+                        for finding in report.findings
+                    )
+                    if report is not None
+                    else 0,
+                    not_running=sum(
+                        finding.status == ControlStatus.FAILED
+                        and finding.installed
+                        and not finding.running
+                        for finding in report.findings
+                    )
+                    if report is not None
+                    else 0,
                 ),
                 delivery=AgentDeliveryStatusSummary(
                     status=delivery_status,

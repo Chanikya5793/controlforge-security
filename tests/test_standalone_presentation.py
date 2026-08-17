@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import cast
 
+import pytest
 from fastapi.testclient import TestClient
 
 from controlforge.models import SecurityEvent
@@ -419,6 +420,40 @@ def test_authenticated_viewer_can_read_bounded_dashboard_projections(tmp_path: P
     assert client.get("/v1/dashboard/posture").status_code == 401
 
 
+@pytest.mark.parametrize(("age", "freshness"), [(900, "fresh"), (901, "stale"), (-1, "clock_skew")])
+def test_device_guidance_uses_server_time_and_includes_observation(
+    tmp_path: Path, age: int, freshness: str
+) -> None:
+    database, repository = configured_repository(tmp_path)
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE devices SET last_seen_at = ? WHERE tenant_id = ? AND device_id = ?",
+            ((NOW - timedelta(seconds=age)).isoformat(), TENANT_ID, "mac-stale"),
+        )
+    records = repository.device_health(TENANT_ID, NOW, device_id="mac-stale")
+    assert len(records) == 1
+    assert records[0]["freshness"] == freshness
+    assert datetime.fromisoformat(str(records[0]["observed_at"]).replace("Z", "+00:00")) == NOW
+    assert records[0]["stale_after_seconds"] == 900
+    assert "not a malware scan" in str(records[0]["guidance"])
+    assert repository.device_health(OTHER_TENANT_ID, NOW, device_id="mac-stale") == []
+
+
+def test_device_detail_is_scoped_redacted_and_requires_authentication(tmp_path: Path) -> None:
+    client = authenticated_viewer_api(tmp_path)
+    response = client.get("/v1/dashboard/devices/mac-stale")
+    assert response.status_code == 200
+    record = response.json()["device"]
+    assert record["device_id"] == "mac-stale"
+    assert record["guidance"]["title"] == "Check this Mac's connection"
+    assert RAW_MARKER not in response.text
+    assert "credential_id" not in response.text
+    assert client.get("/v1/dashboard/devices/not-a-device").status_code == 404
+    assert client.get("/v1/dashboard/devices/" + "a" * 129).status_code == 400
+    client.cookies.clear()
+    assert client.get("/v1/dashboard/devices/mac-stale").status_code == 401
+
+
 def test_dashboard_markup_is_semantic_same_origin_and_role_aware() -> None:
     html = dashboard_html("presentation-test-nonce")
 
@@ -431,6 +466,10 @@ def test_dashboard_markup_is_semantic_same_origin_and_role_aware() -> None:
         'aria-busy="true"',
         "Evidence-first security operations",
         "a different human must review it",
+        "One-time setup code",
+        "Network ID",
+        "Network name",
+        "How setup stays safe",
         "/v1/dashboard/posture",
         "/v1/dashboard/case-assignees",
         "/v1/cases/",
@@ -440,6 +479,15 @@ def test_dashboard_markup_is_semantic_same_origin_and_role_aware() -> None:
     ):
         assert semantic in html
     assert 'nonce="presentation-test-nonce"' in html
+    assert '<div id="invite-accept-card" class="card" hidden>' in html
+    assert "$('#invite-accept-card').hidden=!status.configured" in html
+    assert "Bootstrap token" not in html
+    assert "Organization slug" not in html
+    assert (
+        '<label>Administrator email<input name="email" type="email" required autocomplete="email">'
+        in html
+    )
+    assert '<form id="login-form"' in html and 'autocomplete="username webauthn"' in html
     assert "me.role!=='admin'" in html
     assert "canInvestigate" in html
     assert "canRespond" in html

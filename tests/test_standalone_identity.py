@@ -435,6 +435,28 @@ def test_public_recovery_endpoint_is_rate_limited(tmp_path: Path) -> None:
     )
     assert limited.status_code == 429
     assert int(limited.headers["retry-after"]) > 0
+    assert limited.json()["error"].startswith("Too many attempts. Try again in ")
+
+
+def test_bootstrap_api_explains_invalid_or_expired_code_without_echo(tmp_path: Path) -> None:
+    client, _, _ = api_fixture(tmp_path)
+    rejected = client.post(
+        "/v1/bootstrap/options",
+        headers={"origin": ORIGIN},
+        json={
+            "token": "invalid-one-time-code-that-is-long-enough-value",
+            "tenant_slug": "controlforge",
+            "tenant_display_name": "ControlForge",
+            "email": "admin@example.com",
+            "display_name": "Admin",
+        },
+    )
+    assert rejected.status_code == 401
+    message = rejected.json()["error"]
+    assert message == (
+        "The one-time setup code is invalid or expired. Generate a fresh code and try again."
+    )
+    assert "invalid-one-time-code" not in message
 
 
 def test_api_cookie_origin_csrf_and_logout_enforcement(tmp_path: Path) -> None:

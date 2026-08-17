@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional, cast
 
 from .database import StandaloneDatabase
+from .device_guidance import device_guidance
+from .finding_guidance import finding_guidance
 from .store import _utc_text
 
 CaseFilterStatus = Literal["open", "investigating", "contained", "closed"]
@@ -182,9 +184,11 @@ class StandalonePresentationRepository:
         )
 
     def device_health(
-        self, tenant_id: str, now: datetime, limit: int = 200
+        self, tenant_id: str, now: datetime, limit: int = 200, *, device_id: Optional[str] = None
     ) -> list[dict[str, object]]:
         self._validate_limit(limit)
+        if device_id is not None and (not device_id or len(device_id) > 128):
+            raise PresentationError("invalid device identifier")
         now_utc = self._aware_utc(now)
         with self._database.connect() as connection:
             rows = connection.execute(
@@ -203,13 +207,13 @@ class StandalonePresentationRepository:
                 FROM devices d
                 LEFT JOIN events e
                   ON e.tenant_id = d.tenant_id AND e.device_id = d.device_id
-                WHERE d.tenant_id = ?
+                WHERE d.tenant_id = ? AND (? IS NULL OR d.device_id = ?)
                 GROUP BY d.tenant_id, d.device_id
                 ORDER BY CASE d.status WHEN 'active' THEN 0 WHEN 'enrolling' THEN 1 ELSE 2 END,
                          d.last_seen_at DESC, d.display_name
                 LIMIT ?
                 """,
-                (_utc_text(now_utc), _utc_text(now_utc), tenant_id, limit),
+                (_utc_text(now_utc), _utc_text(now_utc), tenant_id, device_id, device_id, limit),
             ).fetchall()
         result: list[dict[str, object]] = []
         for row in rows:
@@ -219,8 +223,14 @@ class StandalonePresentationRepository:
                 if last_seen is None:
                     freshness = "never_seen"
                 else:
-                    age = max(0, int((now_utc - self._parse_time(last_seen)).total_seconds()))
-                    freshness = "fresh" if age <= self._STALE_DEVICE_SECONDS else "stale"
+                    age = (now_utc - self._parse_time(last_seen)).total_seconds()
+                    freshness = (
+                        "clock_skew"
+                        if age < 0
+                        else "fresh"
+                        if age <= self._STALE_DEVICE_SECONDS
+                        else "stale"
+                    )
             elif row["status"] == "enrolling":
                 freshness = "enrolling"
             result.append(
@@ -235,6 +245,11 @@ class StandalonePresentationRepository:
                     "last_telemetry_at": self._optional_text(row["last_telemetry_at"]),
                     "active_credentials": int(row["active_credentials"] or 0),
                     "next_credential_expiry": self._optional_text(row["next_credential_expiry"]),
+                    "observed_at": _utc_text(now_utc),
+                    "stale_after_seconds": self._STALE_DEVICE_SECONDS,
+                    "guidance": device_guidance(
+                        str(row["status"]), freshness, int(row["active_credentials"] or 0)
+                    ),
                 }
             )
         return result
@@ -247,11 +262,14 @@ class StandalonePresentationRepository:
         priority: Optional[CaseFilterPriority] = None,
         query: str = "",
         limit: int = 200,
+        device_id: Optional[str] = None,
     ) -> list[dict[str, object]]:
         self._validate_limit(limit)
         normalized_query = query.strip().casefold()
         if len(normalized_query) > 120:
             raise PresentationError("case search is too long")
+        if device_id is not None and (not device_id or len(device_id) > 128):
+            raise PresentationError("invalid device identifier")
         search = f"%{self._escape_like(normalized_query)}%"
         with self._database.connect() as connection:
             rows = connection.execute(
@@ -277,6 +295,15 @@ class StandalonePresentationRepository:
                 WHERE c.tenant_id = ?
                   AND (? IS NULL OR c.status = ?)
                   AND (? IS NULL OR c.priority = ?)
+                  AND (? IS NULL OR EXISTS (
+                    SELECT 1 FROM case_alerts dca
+                    JOIN alerts da
+                      ON da.tenant_id = dca.tenant_id AND da.alert_id = dca.alert_id
+                    JOIN events de
+                      ON de.tenant_id = da.tenant_id AND de.event_id = da.event_id
+                    WHERE dca.tenant_id = c.tenant_id AND dca.case_id = c.case_id
+                      AND de.device_id = ?
+                  ))
                   AND (
                     ? = '' OR lower(c.title) LIKE ? ESCAPE '\\'
                     OR lower(c.case_id) LIKE ? ESCAPE '\\'
@@ -305,6 +332,8 @@ class StandalonePresentationRepository:
                     status,
                     priority,
                     priority,
+                    device_id,
+                    device_id,
                     normalized_query,
                     search,
                     search,
@@ -365,6 +394,7 @@ class StandalonePresentationRepository:
                        a.title, a.severity, a.actor, a.reasons_json, a.tags_json,
                        a.evidence_json, a.created_at, e.event_type, e.occurred_at,
                        e.received_at, e.device_id, e.payload_sha256,
+                       d.display_name AS device_name, d.status AS device_status,
                        dr.replay_mode, dr.outcome AS replay_outcome,
                        dr.created_at AS replayed_at
                 FROM case_alerts ca
@@ -372,6 +402,8 @@ class StandalonePresentationRepository:
                   ON a.tenant_id = ca.tenant_id AND a.alert_id = ca.alert_id
                 JOIN events e
                   ON e.tenant_id = a.tenant_id AND e.event_id = a.event_id
+                LEFT JOIN devices d
+                  ON d.tenant_id = e.tenant_id AND d.device_id = e.device_id
                 LEFT JOIN detection_replays dr
                   ON dr.tenant_id = a.tenant_id AND dr.alert_id = a.alert_id
                  AND dr.created_at = (
@@ -476,6 +508,18 @@ class StandalonePresentationRepository:
             "created_at": str(record["created_at"]),
             "reasons": reasons,
             "tags": tags,
+            "guidance": finding_guidance(
+                str(record["event_type"]), device_bound=record["device_id"] is not None
+            ),
+            "device": (
+                {
+                    "device_id": str(record["device_id"]),
+                    "display_name": str(record["device_name"]),
+                    "status": str(record["device_status"]),
+                }
+                if record["device_name"] is not None
+                else None
+            ),
             "matched_evidence": (
                 [str(item) for item in matched if isinstance(item, str)]
                 if isinstance(matched, list)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -17,11 +18,20 @@ from .appliance import (
     StandaloneApplianceLifecycle,
 )
 from .backup import BackupError
+from .connector_launchd import (
+    DEFAULT_STDERR_LOG,
+    DEFAULT_STDOUT_LOG,
+    ConnectorLaunchConfig,
+    ConnectorLaunchdError,
+    TunnelConnectorLaunchdService,
+)
 from .launchd import StandaloneLaunchdError, StandaloneLaunchdService
 from .secrets import SecretProvisioningError
+from .tunnel import render_tunnel_config
 
 ServerRunner = Callable[..., object]
 LaunchdServiceFactory = Callable[[ApplianceLaunchConfig], StandaloneLaunchdService]
+ConnectorServiceFactory = Callable[[ConnectorLaunchConfig], TunnelConnectorLaunchdService]
 INSTALLED_RULES_DIRECTORY = Path("/Library/ControlForge/rules")
 
 
@@ -32,12 +42,45 @@ def _parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
+    tunnel = commands.add_parser(
+        "tunnel-config", help="print a read-only exact-host Tunnel snapshot"
+    )
+    tunnel.add_argument("--database", type=Path, required=True)
+    tunnel.add_argument("--admin-origin", required=True)
+    tunnel.add_argument("--network-base-domain", required=True)
+    tunnel.add_argument("--port", type=int, default=8443)
+    tunnel.add_argument("--tunnel-id", required=True)
+    tunnel.add_argument("--credentials-file", type=Path, required=True)
+    tunnel.add_argument("--ca-pool", type=Path)
+
+    def add_connector_options(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--binary", type=Path, required=True)
+        command.add_argument("--binary-sha256", required=True)
+        command.add_argument("--config", type=Path, required=True)
+        command.add_argument("--stdout-log", type=Path, default=DEFAULT_STDOUT_LOG)
+        command.add_argument("--stderr-log", type=Path, default=DEFAULT_STDERR_LOG)
+
+    for name, help_text in (
+        ("connector-service-install", "install the hash-pinned root Tunnel daemon"),
+        ("connector-service-status", "report bounded Tunnel daemon status"),
+        ("connector-service-uninstall", "remove the Tunnel daemon and preserve its config"),
+    ):
+        connector = commands.add_parser(name, help=help_text)
+        add_connector_options(connector)
+
     def add_launch_options(command: argparse.ArgumentParser) -> None:
         command.add_argument("--root", type=Path, required=True)
         command.add_argument("--rules", type=Path, default=Path("rules"))
         command.add_argument("--admin-origin", default="https://localhost:8443")
         command.add_argument("--rp-id", default="localhost")
+        command.add_argument(
+            "--network-base-domain",
+            help="DNS suffix for network login namespaces; persisted by service-install",
+        )
         command.add_argument("--host", default="127.0.0.1")
+        command.add_argument(
+            "--ingress-mode", choices=("direct", "cloudflare-tunnel"), default="direct"
+        )
         command.add_argument("--port", type=int, default=8443)
         command.add_argument("--tls-certificate", type=Path, required=True)
         command.add_argument("--tls-private-key", type=Path, required=True)
@@ -99,6 +142,12 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _launch_config(args: argparse.Namespace) -> ApplianceLaunchConfig:
+    domain = args.network_base_domain
+    # Interactive commands may capture the environment at installation time.
+    # A daemon restart must use its installed arguments, including an absent
+    # domain, rather than silently adopting a different launchd environment.
+    if domain is None and not getattr(args, "managed_service", False):
+        domain = os.environ.get("CONTROLFORGE_NETWORK_BASE_DOMAIN")
     rules = args.rules
     packaged_rules = Path(__file__).resolve().parent.parent / "data" / "rules"
     if rules == Path("rules") and not rules.exists():
@@ -118,6 +167,18 @@ def _launch_config(args: argparse.Namespace) -> ApplianceLaunchConfig:
         worker_interval_seconds=getattr(args, "worker_interval_seconds", 2.0),
         backup_retention_count=getattr(args, "backup_retention_count", 10),
         bootstrap_ttl_seconds=getattr(args, "bootstrap_ttl_seconds", 900),
+        network_base_domain=domain,
+        ingress_mode=args.ingress_mode,
+    )
+
+
+def _connector_config(args: argparse.Namespace) -> ConnectorLaunchConfig:
+    return ConnectorLaunchConfig(
+        binary=args.binary.expanduser().absolute(),
+        binary_sha256=args.binary_sha256,
+        config_file=args.config.expanduser().absolute(),
+        stdout_log=args.stdout_log.expanduser().absolute(),
+        stderr_log=args.stderr_log.expanduser().absolute(),
     )
 
 
@@ -126,8 +187,32 @@ def run(
     *,
     server_runner: ServerRunner = uvicorn.run,
     launchd_service_factory: LaunchdServiceFactory = StandaloneLaunchdService,
+    connector_service_factory: ConnectorServiceFactory = TunnelConnectorLaunchdService,
 ) -> int:
     args = _parser().parse_args(arguments)
+    if args.command == "tunnel-config":
+        print(
+            render_tunnel_config(
+                database_path=args.database,
+                admin_origin=args.admin_origin,
+                base_domain=args.network_base_domain,
+                origin_port=args.port,
+                tunnel_id=args.tunnel_id,
+                credentials_file=args.credentials_file,
+                ca_pool=args.ca_pool,
+            ),
+            end="",
+        )
+        return 0
+    if args.command.startswith("connector-service-"):
+        connector_service = connector_service_factory(_connector_config(args))
+        if args.command == "connector-service-install":
+            print(json.dumps(connector_service.install().as_dict(), sort_keys=True))
+        elif args.command == "connector-service-status":
+            print(json.dumps(connector_service.status().as_dict(), sort_keys=True))
+        else:
+            print(json.dumps(connector_service.uninstall().as_dict(), sort_keys=True))
+        return 0
     if args.command == "rollback":
         placeholder = ApplianceLaunchConfig(
             root=args.root,
@@ -154,9 +239,9 @@ def run(
 
     config = _launch_config(args)
     if args.command.startswith("service-"):
-        service = launchd_service_factory(config)
+        appliance_service = launchd_service_factory(config)
         if args.command == "service-install":
-            installed = service.install()
+            installed = appliance_service.install()
             print(json.dumps(installed.as_dict(), sort_keys=True))
             if installed.bootstrap_token is not None:
                 print(
@@ -167,9 +252,9 @@ def run(
                 )
             return 0
         if args.command == "service-status":
-            print(json.dumps(service.status().as_dict(), sort_keys=True))
+            print(json.dumps(appliance_service.status().as_dict(), sort_keys=True))
             return 0
-        print(json.dumps(service.uninstall().as_dict(), sort_keys=True))
+        print(json.dumps(appliance_service.uninstall().as_dict(), sort_keys=True))
         return 0
 
     lifecycle = StandaloneApplianceLifecycle(config)
@@ -218,6 +303,7 @@ def run(
             port=config.port,
             ssl_certfile=str(config.tls_certificate),
             ssl_keyfile=str(config.tls_private_key),
+            proxy_headers=False,
         )
     finally:
         prepared.runtime.close()
@@ -230,6 +316,7 @@ def main() -> None:
     except (
         AppliancePreflightError,
         BackupError,
+        ConnectorLaunchdError,
         OSError,
         SecretProvisioningError,
         StandaloneLaunchdError,

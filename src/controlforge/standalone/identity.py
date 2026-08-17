@@ -285,6 +285,10 @@ class HumanIdentityService:
                     "Initial passkey",
                     now,
                 )
+                connection.execute(
+                    "INSERT INTO platform_owners VALUES (1, ?, ?, ?)",
+                    (tenant_id, user_id, _utc_text(now)),
+                )
                 for recovery_code in recovery_codes:
                     connection.execute(
                         """
@@ -383,6 +387,7 @@ class HumanIdentityService:
         with self._database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self.require_current_capability(connection, principal, Capability.MANAGE, now)
                 existing_user = connection.execute(
                     """
                     SELECT 1 FROM users
@@ -557,6 +562,14 @@ class HumanIdentityService:
                 if challenge_change.rowcount != 1 or invite_change.rowcount != 1:
                     raise HumanInviteError("human invite was already consumed or expired")
                 tenant_id = str(row["tenant_id"])
+                issuer = connection.execute(
+                    "SELECT created_by FROM human_invites WHERE invite_id=?",
+                    (row["invite_id"],),
+                ).fetchone()
+                if issuer is None or not self._active_admin(
+                    connection, tenant_id, str(issuer["created_by"])
+                ):
+                    raise HumanInviteError("human invite issuer is no longer authorized")
                 user_id = str(row["user_id"])
                 connection.execute(
                     """
@@ -843,8 +856,14 @@ class HumanIdentityService:
         if not csrf_token or not hmac.compare_digest(principal.csrf_hash, expected):
             raise HumanAuthorizationError("csrf verification failed")
 
-    def rotate_csrf(self, principal: SessionPrincipal, now: datetime) -> str:
-        csrf_token = secrets.token_urlsafe(32)
+    def session_csrf(self, principal: SessionPrincipal, now: datetime) -> str:
+        """Recover a session-bound token without invalidating another browser tab.
+
+        Legacy random tokens converge once when first read after upgrade. New
+        sessions use this purpose-separated PRF from creation; plaintext tokens
+        are never stored, and a session ID alone cannot derive its CSRF value.
+        """
+        csrf_token = self._csrf_token(principal.session_id)
         with self._database.connect() as connection:
             changed = connection.execute(
                 """
@@ -864,6 +883,9 @@ class HumanIdentityService:
             raise SessionError("session is inactive")
         return csrf_token
 
+    def _csrf_token(self, session_id: str) -> str:
+        return self._hash(self._session_pepper, "session-csrf-token-v1", session_id)
+
     def revoke_session(self, principal: SessionPrincipal, now: datetime) -> None:
         with self._database.connect() as connection:
             connection.execute(
@@ -882,6 +904,66 @@ class HumanIdentityService:
     ) -> None:
         if principal.tenant_id != tenant_id or capability not in ROLE_CAPABILITIES[principal.role]:
             raise HumanAuthorizationError("principal is not authorized for this operation")
+
+    @staticmethod
+    def _active_admin(connection: sqlite3.Connection, tenant_id: str, user_id: str) -> bool:
+        row = connection.execute(
+            """SELECT m.home_tenant_id FROM users u
+               JOIN tenants t ON t.tenant_id=u.tenant_id
+               LEFT JOIN owner_memberships m ON m.tenant_id=u.tenant_id AND m.user_id=u.user_id
+               WHERE u.tenant_id=? AND u.user_id=? AND u.status='active'
+                 AND u.role='admin' AND t.status='active'""",
+            (tenant_id, user_id),
+        ).fetchone()
+        if row is None:
+            return False
+        if row["home_tenant_id"] is None:
+            return True
+        return (
+            connection.execute(
+                """SELECT 1 FROM platform_owners o JOIN users u
+                 ON u.tenant_id=o.home_tenant_id AND u.user_id=o.user_id
+               JOIN tenants t ON t.tenant_id=u.tenant_id
+               WHERE o.home_tenant_id=? AND o.user_id=? AND u.status='active'
+                 AND u.role='admin' AND t.status='active'""",
+                (row["home_tenant_id"], user_id),
+            ).fetchone()
+            is not None
+        )
+
+    def require_current_capability(
+        self,
+        connection: sqlite3.Connection,
+        principal: SessionPrincipal,
+        capability: Capability,
+        now: datetime,
+    ) -> None:
+        """Recheck mutable authority inside the caller's management transaction."""
+        self.require_capability(principal, principal.tenant_id, capability)
+        row = connection.execute(
+            """SELECT s.tenant_id AS home_tenant_id, member.role AS member_role
+               FROM sessions s JOIN users home
+                 ON home.tenant_id=s.tenant_id AND home.user_id=s.user_id
+               JOIN tenants home_network ON home_network.tenant_id=s.tenant_id
+               JOIN users member ON member.tenant_id=? AND member.user_id=s.user_id
+               JOIN tenants target ON target.tenant_id=member.tenant_id
+               WHERE s.session_id=? AND s.user_id=? AND s.revoked_at IS NULL AND s.expires_at>?
+                 AND home.status='active' AND home_network.status='active'
+                 AND member.status='active' AND target.status='active'""",
+            (principal.tenant_id, principal.session_id, principal.user_id, _utc_text(now)),
+        ).fetchone()
+        if row is None or row["member_role"] != principal.role:
+            raise HumanAuthorizationError("administrator authority changed; sign in again")
+        if row["home_tenant_id"] != principal.tenant_id:
+            membership = connection.execute(
+                """SELECT 1 FROM owner_memberships WHERE tenant_id=? AND user_id=?
+                     AND home_tenant_id=?""",
+                (principal.tenant_id, principal.user_id, row["home_tenant_id"]),
+            ).fetchone()
+            if membership is None or not self._active_admin(
+                connection, principal.tenant_id, principal.user_id
+            ):
+                raise HumanAuthorizationError("platform owner authority is inactive")
 
     def _create_challenge(
         self,
@@ -978,9 +1060,20 @@ class HumanIdentityService:
         user_id: str,
         now: datetime,
     ) -> SessionIssue:
+        if (
+            connection.execute(
+                """SELECT 1 FROM users u JOIN tenants t ON t.tenant_id=u.tenant_id
+               WHERE u.tenant_id=? AND u.user_id=? AND u.status='active' AND t.status='active'
+                 AND NOT EXISTS (SELECT 1 FROM owner_memberships m
+                     WHERE m.tenant_id=u.tenant_id AND m.user_id=u.user_id)""",
+                (tenant_id, user_id),
+            ).fetchone()
+            is None
+        ):
+            raise SessionError("sign-in identity is inactive")
         session_id = str(uuid.uuid4())
         session_token = f"{session_id}.{secrets.token_urlsafe(32)}"
-        csrf_token = secrets.token_urlsafe(32)
+        csrf_token = self._csrf_token(session_id)
         expires_at = now + timedelta(seconds=self._session_ttl_seconds)
         connection.execute(
             """

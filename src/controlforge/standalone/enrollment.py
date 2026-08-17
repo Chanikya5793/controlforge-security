@@ -174,6 +174,25 @@ class DeviceEnrollmentService:
             expected_device_id=expected_device_id,
         )
 
+    def account_context_for_grant(self, token: str, now: datetime) -> dict[str, str]:
+        """Return server-owned identity for an active account enrollment grant."""
+        with self._database.connect() as connection:
+            row = connection.execute(
+                """SELECT a.account_id,a.tenant_id,t.display_name AS network_name
+                   FROM enrollment_tokens e
+                   JOIN account_enrollment_grants g ON g.token_id=e.token_id
+                   JOIN endpoint_accounts a ON a.tenant_id=g.tenant_id AND a.account_id=g.account_id
+                   JOIN tenants t ON t.tenant_id=a.tenant_id
+                   WHERE e.token_hash=? AND e.expires_at>? AND e.revoked_at IS NULL
+                     AND a.status='active' AND t.status='active'
+                     AND a.setup_completed_at IS NOT NULL
+                     AND a.password_version=g.password_version""",
+                (hashlib.sha256(token.encode()).hexdigest(), _utc_text(now)),
+            ).fetchone()
+        if row is None:
+            raise EnrollmentError("account enrollment context is unavailable")
+        return {key: str(row[key]) for key in ("account_id", "tenant_id", "network_name")}
+
     def list_devices(self, tenant_id: str, now: datetime) -> list[DeviceSummary]:
         self._require_identifier(tenant_id, "tenant identity")
         timestamp = _utc_text(self._require_aware(now))
@@ -263,6 +282,7 @@ class DeviceEnrollmentService:
                 ):
                     raise EnrollmentError("enrollment grant is invalid or expired")
                 if grant["used_at"] is not None:
+                    self._require_account_grant(connection, str(grant["token_id"]))
                     resumed = self._resume_unchecked_grant(
                         connection,
                         grant,
@@ -273,6 +293,7 @@ class DeviceEnrollmentService:
                     )
                     connection.execute("COMMIT")
                     return resumed
+                self._require_account_grant(connection, str(grant["token_id"]))
                 existing = connection.execute(
                     "SELECT status FROM devices WHERE tenant_id = ? AND device_id = ?",
                     (grant["tenant_id"], device_id),
@@ -333,6 +354,22 @@ class DeviceEnrollmentService:
             secret=secret,
             expires_at=expires_at,
         )
+
+    @staticmethod
+    def _require_account_grant(connection: sqlite3.Connection, token_id: str) -> None:
+        account = connection.execute(
+            """SELECT a.status,a.setup_completed_at,a.password_version,g.password_version AS issued
+               FROM account_enrollment_grants g JOIN endpoint_accounts a
+                 ON a.tenant_id=g.tenant_id AND a.account_id=g.account_id
+               WHERE g.token_id=?""",
+            (token_id,),
+        ).fetchone()
+        if account is not None and (
+            account["status"] != "active"
+            or account["setup_completed_at"] is None
+            or account["password_version"] != account["issued"]
+        ):
+            raise EnrollmentError("account enrollment authority is no longer active")
 
     def _resume_unchecked_grant(
         self,

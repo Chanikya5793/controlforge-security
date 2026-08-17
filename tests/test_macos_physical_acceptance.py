@@ -194,7 +194,9 @@ def test_installed_enrolled_and_running_phases_prove_strict_local_boundaries(
         device_id="physical-mac-1",
         agent_version="0.3.0",
         run_status="completed",
-        controls=AgentControlStatusSummary(evaluated=True, total=3, failed=0),
+        controls=AgentControlStatusSummary(
+            evaluated=True, total=3, failed=0, degraded=0, missing=0, not_running=0
+        ),
         delivery=AgentDeliveryStatusSummary(
             status="succeeded",
             batches_delivered=1,
@@ -249,13 +251,20 @@ def test_running_phase_fails_closed_for_stale_or_secret_extended_status(tmp_path
     paths.status_snapshot.write_text(
         json.dumps(
             {
-                "schema_version": "controlforge-agent-status-v2",
+                "schema_version": "controlforge-agent-status-v3",
                 "generated_at": (NOW - timedelta(hours=1)).isoformat(),
                 "device_id": "physical-mac-1",
                 "agent_version": "0.3.0",
                 "run_status": "completed",
                 "failure_stage": None,
-                "controls": {"evaluated": True, "total": 1, "failed": 0},
+                "controls": {
+                    "evaluated": True,
+                    "total": 1,
+                    "failed": 0,
+                    "degraded": 0,
+                    "missing": 0,
+                    "not_running": 0,
+                },
                 "delivery": {
                     "status": "succeeded",
                     "batches_delivered": 1,

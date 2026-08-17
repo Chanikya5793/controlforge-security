@@ -24,7 +24,9 @@ from controlforge import __version__
 from .backup import BackupError, BackupInventoryEntry, RestoreResult, StandaloneBackupService
 from .database import StandaloneDatabase
 from .diagnostics import StandaloneDiagnosticsService
+from .ingress import IngressMode, validate_ingress_listener
 from .migrations import MIGRATIONS
+from .networks import normalize_domain
 from .runtime import StandaloneRuntime, StandaloneRuntimeConfig, build_standalone_runtime
 from .secrets import StandaloneSecretBundle
 from .settings import StandaloneSettings
@@ -104,6 +106,15 @@ class ApplianceLaunchConfig:
     worker_interval_seconds: float = 2.0
     backup_retention_count: int = 10
     bootstrap_ttl_seconds: int = 900
+    network_base_domain: Optional[str] = None
+    ingress_mode: IngressMode = "direct"
+
+    def __post_init__(self) -> None:
+        validate_ingress_listener(self.ingress_mode, self.host)
+        if self.network_base_domain is not None:
+            object.__setattr__(
+                self, "network_base_domain", normalize_domain(self.network_base_domain)
+            )
 
 
 @dataclass(frozen=True)
@@ -142,9 +153,9 @@ class StandaloneApplianceLifecycle:
         rollback: Optional[BackupInventoryEntry] = None
         backups: Optional[StandaloneBackupService] = None
         if schema.state == "upgrade_required":
-            if schema.tenant_count != 1:
+            if not 1 <= schema.tenant_count <= 200:
                 raise AppliancePreflightError(
-                    "upgrade requires exactly one configured standalone organization"
+                    "upgrade requires between 1 and 200 configured networks"
                 )
             secrets = StandaloneSecretBundle.load_existing(self.paths.secrets_directory)
             backups = StandaloneBackupService(
@@ -160,7 +171,13 @@ class StandaloneApplianceLifecycle:
         try:
             runtime = build_standalone_runtime(
                 StandaloneRuntimeConfig(
-                    settings=StandaloneSettings(database_path=self.paths.database),
+                    settings=StandaloneSettings.from_environment().model_copy(
+                        update={
+                            "database_path": self.paths.database,
+                            "network_base_domain": self.config.network_base_domain,
+                            "ingress_mode": self.config.ingress_mode,
+                        }
+                    ),
                     rules_directory=self.config.rules_directory,
                     secret_directory=self.paths.secrets_directory,
                     admin_origin=self.config.admin_origin,
@@ -382,8 +399,8 @@ class StandaloneApplianceLifecycle:
         expected = tuple((migration.version, migration.name) for migration in MIGRATIONS)
         if not applied or applied != expected[: len(applied)]:
             raise AppliancePreflightError("appliance schema ledger is unsupported")
-        if tenant_count > 1:
-            raise AppliancePreflightError("standalone database contains multiple organizations")
+        if tenant_count > 200:
+            raise AppliancePreflightError("standalone database exceeds the 200-network limit")
         state: Literal["current", "upgrade_required"] = (
             "current" if len(applied) == len(expected) else "upgrade_required"
         )
@@ -456,7 +473,12 @@ def _validate_tls(config: ApplianceLaunchConfig, now: datetime) -> TlsPreflight:
         raise AppliancePreflightError("administrator origin must be one exact HTTPS origin")
     hostname = origin.hostname.casefold().rstrip(".")
     expected_port = origin.port or 443
-    if expected_port != config.port:
+    if config.ingress_mode == "cloudflare-tunnel":
+        if expected_port != 443:
+            raise AppliancePreflightError(
+                "Cloudflare Tunnel administrator origin must use public HTTPS port 443"
+            )
+    elif expected_port != config.port:
         raise AppliancePreflightError("administrator origin port does not match the listener")
     if config.rp_id.casefold().rstrip(".") != hostname:
         raise AppliancePreflightError("WebAuthn RP ID must exactly match the administrator host")

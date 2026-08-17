@@ -412,7 +412,7 @@ class MacOSPhysicalAcceptanceVerifier:
             if len(raw) <= 65_536:
                 status = AgentStatusSnapshot.model_validate_json(raw)
                 age = (now - status.generated_at).total_seconds()
-                status_valid = status.schema_version == "controlforge-agent-status-v2"
+                status_valid = status.schema_version == "controlforge-agent-status-v3"
                 status_fresh = -60 <= age <= 300
                 run_completed = status.run_status == "completed"
                 containment_bounded = status.containment.state in {

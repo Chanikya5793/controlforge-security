@@ -12,11 +12,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
 from fastapi import FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 from controlforge import __version__
 
+from .accounts import EndpointAccountService
 from .auth import CollectorAuthenticationError, CollectorReplayError, SignedCollectorRequest
 from .cases import (
     CaseDetail,
@@ -45,6 +48,11 @@ from .ingestion import (
     CollectorIngestionService,
     DeviceBindingError,
 )
+from .ingress import IngressMode, IngressPolicy, rate_limit_client
+from .network_api import install_network_routes
+from .network_dashboard import network_dashboard_html
+from .network_routing import NetworkRoutingService
+from .networks import NetworkService
 from .operations import StandaloneOperationsRepository
 from .presentation import (
     CaseFilterPriority,
@@ -141,6 +149,7 @@ class EnrollmentClaimInput(BaseModel):
     )
     display_name: str = Field(min_length=1, max_length=100)
     platform: str = Field(pattern=r"^macos$")
+    include_account_context: bool = False
 
 
 class CredentialRotationInput(BaseModel):
@@ -248,6 +257,8 @@ class StandaloneApiServices:
     presentation: Optional[StandalonePresentationRepository] = None
     retention: Optional[StandaloneRetentionService] = None
     credential_rotation: Optional[DeviceCredentialRotationService] = None
+    networks: Optional[NetworkService] = None
+    accounts: Optional[EndpointAccountService] = None
 
 
 class PublicRateLimitError(RuntimeError):
@@ -266,12 +277,16 @@ def create_standalone_app(
     services: StandaloneApiServices,
     admin_origin: str,
     clock: Callable[[], datetime] = _utc_now,
+    *,
+    ingress_mode: IngressMode = "direct",
 ) -> FastAPI:
     """Build the intentionally small standalone authenticated surface."""
 
     expected_origin = admin_origin.rstrip("/")
     if not expected_origin.startswith("https://"):
         raise ValueError("standalone admin origin must use HTTPS")
+    routing = NetworkRoutingService(services.networks, expected_origin)
+    ingress = IngressPolicy(ingress_mode)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -291,13 +306,47 @@ def create_standalone_app(
         description="Authenticated standalone security operations control plane.",
         lifespan=lifespan,
     )
+    if services.networks is not None and services.accounts is not None:
+        install_network_routes(
+            app, services.networks, services.accounts, services.rate_limiter, expected_origin, clock
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def redacted_validation_error(
+        _request: Request,
+        _error: RequestValidationError,
+    ) -> JSONResponse:
+        # Pydantic's default error payload can echo passwords and bootstrap tokens.
+        return JSONResponse(
+            {"error": "Check the required fields and their format."}, status_code=422
+        )
+
+    @app.middleware("http")
+    async def bounded_account_body(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        if request.url.path.startswith(("/v1/endpoint/", "/v1/network/", "/v1/networks")):
+            chunks: list[bytes] = []
+            size = 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > 8192:
+                    return JSONResponse({"error": "Account request is too large."}, status_code=413)
+                chunks.append(chunk)
+            # Preserve the bounded body for FastAPI's subsequent model validation.
+            request._body = b"".join(chunks)
+        return await call_next(request)
 
     @app.middleware("http")
     async def security_headers(
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        response = await call_next(request)
+        entry_response: Optional[Response] = ingress.prepare(request)
+        if entry_response is None:
+            entry_response = await run_in_threadpool(routing.response_for, request)
+        response = entry_response if entry_response is not None else await call_next(request)
         response.headers["x-content-type-options"] = "nosniff"
         response.headers["x-frame-options"] = "DENY"
         response.headers["referrer-policy"] = "no-referrer"
@@ -319,7 +368,6 @@ def create_standalone_app(
     ) -> JSONResponse:
         return JSONResponse({"error": "authorization failed"}, status_code=403)
 
-    @app.exception_handler(BootstrapError)
     @app.exception_handler(ChallengeError)
     @app.exception_handler(SessionError)
     @app.exception_handler(HumanInviteError)
@@ -328,6 +376,21 @@ def create_standalone_app(
         _error: IdentityError,
     ) -> JSONResponse:
         return JSONResponse({"error": "authentication failed"}, status_code=401)
+
+    @app.exception_handler(BootstrapError)
+    async def bootstrap_authentication_error(
+        _request: Request,
+        _error: BootstrapError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            {
+                "error": (
+                    "The one-time setup code is invalid or expired. "
+                    "Generate a fresh code and try again."
+                )
+            },
+            status_code=401,
+        )
 
     @app.exception_handler(CollectorReplayError)
     async def collector_replay_error(
@@ -448,7 +511,7 @@ def create_standalone_app(
         error: PublicRateLimitError,
     ) -> JSONResponse:
         return JSONResponse(
-            {"error": "too many requests"},
+            {"error": (f"Too many attempts. Try again in {error.retry_after_seconds} seconds.")},
             status_code=429,
             headers={"retry-after": str(error.retry_after_seconds)},
         )
@@ -465,7 +528,7 @@ def create_standalone_app(
         window: timedelta,
         identity: str = "",
     ) -> None:
-        client_host = request.client.host if request.client is not None else "unknown"
+        client_host = rate_limit_client(request)
         decision = services.rate_limiter.check(
             scope,
             f"{client_host}|{identity}",
@@ -478,7 +541,14 @@ def create_standalone_app(
 
     def require_session(request: Request) -> SessionPrincipal:
         token = request.cookies.get(SESSION_COOKIE, "")
-        return services.identity.authenticate_session(token, clock())
+        principal = services.identity.authenticate_session(token, clock())
+        if (
+            services.networks is not None
+            and not request.url.path.startswith("/v1/auth/")
+            and request.url.path != "/v1/me"
+        ):
+            return services.networks.scope(principal, request.headers.get("x-network-id", ""))
+        return principal
 
     def require_human_mutation(request: Request) -> SessionPrincipal:
         require_origin(request)
@@ -638,7 +708,7 @@ def create_standalone_app(
         return RedirectResponse("/admin", status_code=307)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
-    def admin_dashboard() -> HTMLResponse:
+    def admin_dashboard(request: Request) -> HTMLResponse:
         nonce = secrets.token_urlsafe(24)
         csp = (
             "default-src 'none'; "
@@ -646,9 +716,24 @@ def create_standalone_app(
             "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         )
         return HTMLResponse(
-            dashboard_html(nonce),
+            dashboard_html(
+                nonce,
+                network_console=services.networks is not None
+                and request.query_params.get("investigate") != "1",
+                network_support=services.networks is not None,
+            ),
             headers={"content-security-policy": csp},
         )
+
+    @app.get("/console", response_class=HTMLResponse, include_in_schema=False)
+    def network_console() -> HTMLResponse:
+        nonce = secrets.token_urlsafe(24)
+        csp = (
+            "default-src 'none'; "
+            f"style-src 'nonce-{nonce}'; script-src 'nonce-{nonce}'; "
+            "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        )
+        return HTMLResponse(network_dashboard_html(nonce), headers={"content-security-policy": csp})
 
     @app.get("/v1/bootstrap/status")
     def bootstrap_status() -> dict[str, bool]:
@@ -836,7 +921,7 @@ def create_standalone_app(
     @app.get("/v1/auth/csrf")
     def csrf(request: Request) -> dict[str, str]:
         principal = require_session(request)
-        return {"csrf_token": services.identity.rotate_csrf(principal, clock())}
+        return {"csrf_token": services.identity.session_csrf(principal, clock())}
 
     @app.post("/v1/auth/logout")
     def logout(request: Request, response: Response) -> dict[str, str]:
@@ -967,6 +1052,17 @@ def create_standalone_app(
             )
         }
 
+    @app.get("/v1/dashboard/devices/{device_id}")
+    def dashboard_device(device_id: str, request: Request) -> JSONResponse:
+        principal = require_session(request)
+        services.identity.require_capability(principal, principal.tenant_id, Capability.VIEW)
+        records = require_presentation().device_health(
+            principal.tenant_id, clock(), 1, device_id=device_id
+        )
+        if not records:
+            return JSONResponse({"error": "Device not found in this network."}, status_code=404)
+        return JSONResponse({"device": records[0]})
+
     @app.get("/v1/dashboard/cases")
     def dashboard_cases(
         request: Request,
@@ -974,6 +1070,7 @@ def create_standalone_app(
         priority: Optional[CaseFilterPriority] = None,
         query: str = "",
         limit: int = 200,
+        device_id: Optional[str] = None,
     ) -> dict[str, object]:
         principal = require_session(request)
         services.identity.require_capability(principal, principal.tenant_id, Capability.VIEW)
@@ -984,6 +1081,7 @@ def create_standalone_app(
                 priority=priority,
                 query=query,
                 limit=limit,
+                device_id=device_id,
             )
         }
 
@@ -1310,6 +1408,11 @@ def create_standalone_app(
             window=timedelta(minutes=15),
             identity=input_data.device_id,
         )
+        context = (
+            services.enrollment.account_context_for_grant(input_data.token, clock())
+            if input_data.include_account_context
+            else {}
+        )
         credential = services.enrollment.claim_grant(
             input_data.token,
             input_data.device_id,
@@ -1318,6 +1421,7 @@ def create_standalone_app(
             clock(),
         )
         return {
+            **context,
             "tenant_id": credential.tenant_id,
             "device_id": credential.device_id,
             "credential_id": credential.credential_id,

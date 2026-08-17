@@ -9,6 +9,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .ingress import IngressMode
+
 
 class StandaloneSettings(BaseModel):
     """Runtime limits with conservative defaults for one local appliance."""
@@ -19,6 +21,8 @@ class StandaloneSettings(BaseModel):
     busy_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
     worker_lease_seconds: int = Field(default=60, ge=5, le=3_600)
     worker_max_attempts: int = Field(default=5, ge=1, le=100)
+    network_base_domain: Optional[str] = None
+    ingress_mode: IngressMode = "direct"
 
     @classmethod
     def from_environment(
@@ -37,4 +41,6 @@ class StandaloneSettings(BaseModel):
             payload["worker_lease_seconds"] = values["CONTROLFORGE_WORKER_LEASE_SECONDS"]
         if "CONTROLFORGE_WORKER_MAX_ATTEMPTS" in values:
             payload["worker_max_attempts"] = values["CONTROLFORGE_WORKER_MAX_ATTEMPTS"]
+        if "CONTROLFORGE_NETWORK_BASE_DOMAIN" in values:
+            payload["network_base_domain"] = values["CONTROLFORGE_NETWORK_BASE_DOMAIN"]
         return cls.model_validate(payload)

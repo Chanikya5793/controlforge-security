@@ -25,7 +25,10 @@ def test_native_user_dashboard_strict_redacted_contract(
             "-framework",
             "AppKit",
             str(project_root / "deployment/macos/user-dashboard.swift"),
+            str(project_root / "deployment/macos/account-onboarding.swift"),
             str(project_root / "tests/fixtures/user_dashboard_contract.swift"),
+            str(project_root / "tests/fixtures/account_onboarding_contract.swift"),
+            str(project_root / "tests/fixtures/mac_guidance_contract.swift"),
             "-o",
             str(binary),
         ],
@@ -43,4 +46,4 @@ def test_native_user_dashboard_strict_redacted_contract(
         text=True,
         timeout=10,
     )
-    assert contract_result.returncode == 0, contract_result.stderr
+    assert contract_result.returncode == 0, contract_result.stdout + contract_result.stderr

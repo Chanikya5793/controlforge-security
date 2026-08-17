@@ -146,6 +146,9 @@ class StandaloneResponseService:
         with self._database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self._identity.require_current_capability(
+                    connection, principal, Capability.PROPOSE_RESPONSE, now
+                )
                 self._expire_due(
                     connection,
                     principal.tenant_id,
@@ -239,6 +242,9 @@ class StandaloneResponseService:
         with self._database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self._identity.require_current_capability(
+                    connection, principal, Capability.APPROVE_RESPONSE, now
+                )
                 row = self._require_action(connection, principal.tenant_id, action_id)
                 if str(row["proposed_by"]) == principal.user_id:
                     raise HumanAuthorizationError("response proposer cannot approve the action")
@@ -310,6 +316,9 @@ class StandaloneResponseService:
         with self._database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self._identity.require_current_capability(
+                    connection, principal, Capability.APPROVE_RESPONSE, now
+                )
                 row = self._require_action(connection, principal.tenant_id, action_id)
                 if str(row["proposed_by"]) == principal.user_id:
                     raise HumanAuthorizationError("response proposer cannot reject the action")
