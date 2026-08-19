@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "controlforge-security"
-version = "0.3.0"
+version = "0.4.0"
 description = "Endpoint security-control assurance and detection automation platform"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -64,6 +64,9 @@ controlforge = "controlforge.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/controlforge"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/tests/preview_network_console.py", "/tests/preview_mac_account.swift", "/tests/preview_mac_guidance.swift"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "rules" = "controlforge/data/rules"

@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+# Fixed install locations only. Never follow a pre-existing redirect while the
+# installer owns root authority, and never install to a different mounted Mac.
+if [ "$(/usr/bin/id -u)" != "0" ] || [ "${3:-}" != "/" ]; then
+  echo "ControlForge installation requires the running startup volume and administrator authorization." >&2
+  exit 1
+fi
+for owned_path in \
+  /Library/ControlForge \
+  "/Library/Application Support/ControlForge" \
+  /Applications/ControlForge.app \
+  /Library/LaunchDaemons/com.controlforge.agent.plist
+do
+  if [ -L "$owned_path" ]; then
+    echo "ControlForge installation refused a redirected installation path." >&2
+    exit 1
+  fi
+  if [ -e "$owned_path" ]; then
+    if [ "$(/usr/bin/stat -f %u "$owned_path")" != "0" ]; then
+      echo "ControlForge installation found an unmanaged installation. Ask its administrator to migrate it." >&2
+      exit 1
+    fi
+    untrusted_path=$(/usr/bin/find "$owned_path" \
+      \( -type l -o -perm -020 -o -perm -002 -o ! -user root -o \( ! -type f -a ! -type d \) \) \
+      -print -quit)
+    if [ -n "$untrusted_path" ]; then
+      echo "ControlForge installation refused an unsafe file inside its installation. Ask its administrator to repair it." >&2
+      exit 1
+    fi
+  fi
+done
+exit 0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import platform
 import plistlib
 import shutil
@@ -7,6 +8,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
+from controlforge.macos_installer import write_installer_defaults
 
 
 def test_pyinstaller_entrypoint_bundles_hardened_appliance_dispatch(
@@ -19,6 +22,22 @@ def test_pyinstaller_entrypoint_bundles_hardened_appliance_dispatch(
     assert '"$package_root/Library/ControlForge/rules"' in build_script
     assert '"$project_root"/rules/*.yml' in build_script
     assert "deployment/macos/entrypoint.py" in build_script
+    assert '"$script_dir/account-onboarding.swift"' in build_script
+    assert "controlforge.macos_installer" in build_script
+    assert "CONTROLFORGE_ACCOUNT_SERVER_HOST" in build_script
+    assert "CONTROLFORGE_RELEASE_CHANNEL" in build_script
+    assert "CONTROLFORGE_PYTHON" in build_script
+    assert "import pydantic, PyInstaller" in build_script
+    assert "/usr/bin/python3" not in build_script
+    assert "Production releases require a clean source tree." in build_script
+    assert "CONTROLFORGE_PRODUCTION_ACCOUNT_SERVER_HOST" in build_script
+    assert '"$source_tag" != "v$version"' in build_script
+    assert "controlforge.release_manifest" in build_script
+    assert 'release-build.json"' in build_script
+    assert 'release_manifest="$output_dir/ControlForge-${version}.release.json"' in build_script
+    assert "/usr/bin/xcrun stapler validate" in build_script
+    assert '"$package_root/Library/ControlForge/status/account-server.json"' not in build_script
+    assert "preview_mac_account" not in build_script
     assert "from controlforge.standalone.__main__ import run as standalone_run" in entrypoint
     assert 'sys.argv[1] == "standalone-appliance"' in entrypoint
     assert "standalone_run(sys.argv[2:])" in entrypoint
@@ -63,6 +82,7 @@ def test_package_sources_preserve_live_config_and_ship_disabled_launchd(
     install = '/usr/bin/install -o root -g wheel -m 600 "$collector_default" "$collector_config"'
     assert postinstall.index(guard) < postinstall.index(install)
     assert "/bin/rm" not in postinstall
+    assert "/Library/ControlForge/bin/controlforge agent-provision-account-server" in postinstall
     assert launchd["Disabled"] is True
     assert launchd["RunAtLoad"] is True
     assert launchd["ProgramArguments"] == [
@@ -116,6 +136,10 @@ def test_package_archive_contains_default_not_live_config(
     binary.write_bytes(b"package-fixture")
     scripts.mkdir()
     shutil.copy2(project_root / "deployment/macos/scripts/postinstall", scripts / "postinstall")
+    shutil.copy2(project_root / "deployment/macos/scripts/preinstall", scripts / "preinstall")
+    defaults = package_root / "Library/ControlForge/installer/account-server.default.json"
+    defaults.parent.mkdir(parents=True)
+    write_installer_defaults(defaults, "accounts.example.com", 8443)
 
     build = subprocess.run(  # noqa: S603
         [
@@ -145,6 +169,9 @@ def test_package_archive_contains_default_not_live_config(
     )
     assert payload.returncode == 0, payload.stderr
     assert "collector.default.yml" in payload.stdout
+    assert "account-server.default.json" in payload.stdout
+    assert "status/account-server.json" not in payload.stdout
+    assert "network-membership.json" not in payload.stdout
     assert "collector.yml" not in payload.stdout.replace("collector.default.yml", "")
 
     expand = subprocess.run(  # noqa: S603
@@ -157,3 +184,30 @@ def test_package_archive_contains_default_not_live_config(
     assert expand.returncode == 0, expand.stderr
     archived_postinstall = (expanded / "Scripts/postinstall").read_bytes()
     assert archived_postinstall == (scripts / "postinstall").read_bytes()
+    assert (expanded / "Scripts/preinstall").read_bytes() == (scripts / "preinstall").read_bytes()
+    assert json.loads(defaults.read_bytes()) == {
+        "schema_version": "controlforge-account-installer-v1",
+        "mode": "account",
+        "api_host": "accounts.example.com",
+        "api_port": 8443,
+    }
+
+
+def test_package_scripts_are_parseable_and_reject_another_install_volume(project_root):
+    scripts = project_root / "deployment/macos/scripts"
+    preinstall = (scripts / "preinstall").read_text()
+    # find -perm -022 requires BOTH write bits; reject either bit instead.
+    assert "-perm -020 -o -perm -002" in preinstall
+    assert "-perm -022" not in preinstall
+    for name in ("preinstall", "postinstall"):
+        script = scripts / name
+        subprocess.run(["/bin/sh", "-n", str(script)], check=True, capture_output=True)  # noqa: S603
+        # Both scripts must fail before filesystem changes. Never execute an
+        # installation path against the current machine in the test suite.
+        result = subprocess.run(  # noqa: S603
+            ["/bin/sh", str(script), "fixture.pkg", "/", "/Volumes/NotTheStartupVolume"],
+            check=False,
+            capture_output=True,
+            timeout=5,
+        )
+        assert result.returncode == 1 and b"startup volume" in result.stderr
