@@ -2,15 +2,20 @@
 
 Status: pre-release acceptance specification and current automated evidence.
 
-Last reviewed: 2026-08-24.
+Last reviewed: 2026-08-28. Signed-artifact evidence below is from 2026-08-24,
+before the current multi-network account and native status-v3 changes.
 
 ## Release decision
 
 ControlForge Standalone is **not yet release-ready**. The local control plane now has a
 substantial operating loop, but source tests and an in-process API exercise are not evidence
 of a clean appliance installation, a trusted TLS deployment, a hardware-backed passkey, or
-a physical endpoint signal. The current-source artifact is a signed, notarized, and stapled release candidate,
-but it has deliberately not been installed over this Mac's active collector.
+a physical endpoint signal. The historical 2026-08-24 artifact is signed,
+notarized, and stapled, but it is not a package of the current working tree and
+has deliberately not been installed over this Mac's active collector. The new
+account-enabled release must target a verified standalone HTTPS account server;
+its installer and clean-device workflow are not yet release evidence. See the
+[multi-network product contract](MULTI_NETWORK_PRODUCT.md) for current local proof.
 
 The release claim is permitted only after every required row below is `PASS` with evidence
 from the named boundary. A database table or UI placeholder is not an implemented workflow.
@@ -27,7 +32,7 @@ Evidence states:
 
 | Stage | Standalone 1.0 acceptance criterion | Current evidence | Current state | Evidence still required for release |
 |---|---|---|---|---|
-| Install | A clean supported Mac installs one appliance and local app without source edits; upgrade, rollback, and uninstall preserve the documented data contract. | The current-source `ControlForge-0.3.0.pkg` is 14,526,455 bytes with SHA-256 `a80cd724a6202f773074a002e534f78bf9b17c0fb3374606421017d929eacd0a`. It is Developer ID Installer-signed, Apple-accepted under notarization submission `2ff3b42c-d5a3-44a0-ba09-8c8be2187dfe`, stapled, and accepted by `spctl`. Its strict code-sign, payload, bundled standalone launcher, exact installed canonical rule set, credential-rotation, endpoint lifecycle, service lifecycle, local containment-recovery commands, and containment-aware native dashboard boundaries were inspected. | PARTIAL | Install on a separate clean Mac; exercise launch, reboot, crash recovery, upgrade, rollback, endpoint uninstall, appliance-service uninstall, and post-operation data/health checks. |
+| Install | A clean supported Mac installs one appliance and local app without source edits; upgrade, rollback, and uninstall preserve the documented data contract. | The historical 2026-08-24 `ControlForge-0.3.0.pkg` is 14,526,455 bytes with SHA-256 `a80cd724a6202f773074a002e534f78bf9b17c0fb3374606421017d929eacd0a`. It is Developer ID Installer-signed, Apple-accepted under notarization submission `2ff3b42c-d5a3-44a0-ba09-8c8be2187dfe`, stapled, and accepted by `spctl`. Its strict code-sign, payload, bundled standalone launcher, exact canonical rule set, credential-rotation, endpoint lifecycle, service lifecycle, local containment-recovery commands, and status-v2 dashboard boundaries were inspected. It does not include the current account workflow or status v3. | PARTIAL | Build a current account-enabled candidate for the verified server, sign and notarize it, then install on a separate clean Mac; exercise launch, reboot, crash recovery, upgrade, rollback, endpoint uninstall, appliance-service uninstall, and post-operation data/health checks. |
 | Bootstrap | The console emits one expiring token; the first admin completes a hardware-backed passkey ceremony; the token and challenge cannot be reused. | Real identity service and HTTP routes pass using a deterministic test passkey adapter. Production uses `WebAuthnPasskeyAdapter`. | PARTIAL | Supported browser plus real platform authenticator, trusted origin, UV evidence, recovery-code exercise, expiry/replay exercise on the installed appliance. |
 | Enroll | An admin creates a bound one-use grant; a Mac claims it once; its credential is device-bound, encrypted at rest, and placed into the intended Keychain boundary without manual long-lived-secret handling. | Grant, claim, encrypted persistence, device binding, replay rejection, activation, uninstall, and endpoint-bound rotation have automated service/API/package tests. Rotation creates an inactive replacement, encrypts it for the predecessor, swaps the fixed System Keychain item, activates only after a replacement-signed acknowledgement, and then revokes the predecessor. No plaintext replacement secret enters the admin response or endpoint spool. | PARTIAL | Root System Keychain/ACL verification on an installed Mac; live claim/check-in/activation; crash-during-swap recovery; live revocation; network-loss recovery; and physical uninstall/PF-release proof. |
 | Signal | A real supported endpoint produces a controlled signal; signed ingestion accepts it exactly once and creates one durable job. | The harness sends a synthetic encoded-PowerShell event through the real standalone HMAC/API/storage boundary. | PARTIAL | Real Santa or other documented endpoint telemetry from an enrolled clean Mac, with event digest and device identity correlated to the installed artifact. |
@@ -85,7 +90,11 @@ source .venv/bin/activate
 python tools/verify_standalone_acceptance.py --json
 ```
 
-Run it with the shared local/Cloud stateless contract gates and retain a non-secret report:
+The following commands inspect the historical 2026-08-24 artifact alongside the
+current local/Cloud stateless contracts. They do **not** prove that artifact
+contains the multi-network account workflow or native status v3. Replace both
+package path and digest with a newly built, verified candidate for a new release.
+Retain a non-secret report:
 
 ```bash
 source .venv/bin/activate
@@ -284,11 +293,13 @@ For each release candidate, retain a claim ledger containing:
 - upgrade, rollback, and uninstall results;
 - every remaining limitation and unverified boundary.
 
-An older signed/notarized collector package is not evidence for a newly assembled Standalone
-package. The newly assembled Standalone-capable release candidate is signed, notarized, and
-stapled, but it is not claimed as installed, upgraded, rolled back, removed, or accepted on a
-separate clean Mac. There is also no trusted-certificate or physical-hardware acceptance
-evidence for this milestone yet.
+An older signed/notarized collector package is not evidence for a newly assembled
+Standalone package. The historical 2026-08-24 Standalone-capable candidate is
+signed, notarized and stapled; it does not contain the current multi-network
+account and native status-v3 updates. Neither that historical artifact nor the
+new source is claimed as clean-installed, upgraded, rolled back, removed or
+accepted on a separate Mac. Trusted-certificate and physical-hardware acceptance
+remain separate gates.
 
 ## Response boundary
 

@@ -78,6 +78,27 @@ The fixture probe allows every branch to be reproduced without requiring an EDR 
    bounded redacted status snapshot, including enum-only containment posture and a bounded release
    time. It receives no action identifiers, rationale, PF recovery material, evidence, administrator,
    or response capability.
+9. Multi-network entry links are owner-controlled, revisioned and audited. Exact
+   active aliases redirect only root GET/HEAD requests to one canonical HTTPS
+   sign-in origin; APIs run only on the canonical host. A network hint is checked
+   against authenticated membership and never grants authority. Application
+    routing, DNS/TLS publication and deployment acceptance are separate states.
+    Device investigation links use explicit membership-checked network scope and
+    exact event-to-device joins. Static event-category guidance accompanies the
+    saved rule evidence; it neither reevaluates rules nor changes detection results.
+    Case views discard superseded reads and clear failed selections before allowing
+    further analyst actions. The native user app receives none of these projections.
+10. The optional same-host Tunnel connector uses a loopback HTTPS origin with
+    certificate verification and preserved Host. Explicit ingress mode validates
+    its client-address metadata for rate-limit partitioning only; direct mode
+    ignores proxy headers. Password, passkey, HMAC, network and CSRF boundaries
+    are unchanged. The CLI exports exact enabled routing entries from a read-only
+    SQLite transaction; it does not replicate the identity store into the Worker.
+11. A managed Tunnel daemon executes only a regular connector binary from a
+    root-owned, non-writable directory whose SHA-256 is pinned at installation.
+    Its private root-owned configuration is validated before an exact launchd
+    plist is installed atomically. User-writable package-manager prefixes and
+    symlinked executables are never valid root-service boundaries.
 
 ### Cloud SOC path
 

@@ -87,6 +87,119 @@ export NOTARY_PROFILE='controlforge-notary'
 deployment/macos/build-pkg.sh
 ```
 
+The builder uses `.venv/bin/python` by default. Set `CONTROLFORGE_PYTHON` only to
+another explicit project interpreter containing both the application and
+`macos-dist` dependencies; it never falls back to Apple's bare system Python.
+
+Every build emits two different provenance records:
+
+- `/Library/ControlForge/installer/release-build.json` inside the PKG records
+  version, release channel, exact Git commit, dirty state, architecture, minimum
+  macOS and the non-secret account destination.
+- `ControlForge-VERSION.release.json` beside the PKG binds that same identity to
+  the package filename, byte size and SHA-256 plus the observed signing and
+  notarization state.
+
+The native app reads only the root-owned, non-writable embedded record and
+shows the app version, release channel and short source revision in **Help &
+Diagnostics**. Invalid, oversized, symlinked or extended metadata is ignored.
+This lets a user distinguish a development copy from staging or production
+without exposing credentials or tenant data.
+
+Verify the pair before physical acceptance:
+
+```bash
+python -m controlforge.release_manifest verify \
+  --manifest /path/to/ControlForge-0.4.0.release.json \
+  --package /path/to/ControlForge-0.4.0.pkg
+
+python tools/verify_macos_physical_acceptance.py \
+  --phase preinstall \
+  --package /path/to/ControlForge-0.4.0.pkg \
+  --release-manifest /path/to/ControlForge-0.4.0.release.json
+```
+
+Use `CONTROLFORGE_RELEASE_CHANNEL=staging` for account-enabled acceptance.
+`production` is fail-closed: it requires a clean tree, exact `vVERSION` tag,
+matching `CONTROLFORGE_ACCOUNT_SERVER_HOST` and
+`CONTROLFORGE_PRODUCTION_ACCOUNT_SERVER_HOST`, both Developer ID identities and
+the notary profile. This prevents a staging destination or uncommitted source
+from being labeled as a production release.
+
+### Native guidance and status v3 (current source, not release evidence)
+
+The current collector writes `controlforge-agent-status-v3`. Its controls object
+requires `evaluated`, `total`, `failed`, `degraded`, `missing`, and `not_running`.
+Counts come from the actual structured control report, not parsed evidence text.
+Failed plus degraded cannot exceed total; missing plus stopped cannot exceed
+failed. No component names, paths, raw events or recommended commands enter the
+user-readable snapshot. The current native app accepts v1/v2 as legacy summaries
+without treating absent degraded details as zero.
+
+Native guidance separates component health, activity collection, report delivery
+and network restriction. Fresh successful delivery cannot hide a degraded check,
+unattempted delivery cannot imply a check-in, stale cards are neutral/historical,
+and a scheduled restriction release is not reported as completed without a newer
+state. Account and Help buttons only navigate; Refresh rereads the saved report
+and does not scan, upload, restart services or change protection settings.
+
+Upgrade the collector and native application together in a newly built installer.
+An old app safely rejects v3 until upgraded; the new app can read an older
+collector's v1/v2 report with explicit limitations. The current-source physical
+acceptance verifier requires v3. The earlier signed/notarized v2 package is
+historical evidence, not proof of this update. A fresh signed artifact and real
+clean-Mac acceptance remain required.
+
+### Account-enabled installers
+
+For the new standalone account workflow, build with the actual trusted HTTPS host
+serving the account API. Do not infer this address from a person's username domain.
+The following host is an example, not a live ControlForge service:
+
+```bash
+CONTROLFORGE_ACCOUNT_SERVER_HOST=accounts.example.com \
+CONTROLFORGE_ACCOUNT_SERVER_PORT=443 \
+CONTROLFORGE_RELEASE_CHANNEL=staging \
+CONTROLFORGE_BUILD_LABEL=account-candidate \
+deployment/macos/build-pkg.sh
+```
+
+`CONTROLFORGE_BUILD_LABEL` puts the output in its own subdirectory under
+`dist/macos` so a test candidate does not replace an existing release artifact.
+Use the same Developer ID and notarization variables above for a distributable
+candidate; a successful unsigned build is not a release acceptance result.
+
+The PKG carries a non-secret `account-server.default.json`. Post-installation calls
+the fixed root helper to create `/Library/ControlForge/status/account-server.json`
+only on a fresh unenrolled Mac, with a new device ID generated on that Mac. Users
+then open ControlForge, sign in with the credentials from their network admin,
+change the initial password and explicitly connect the device. They do not type a
+server URL or run a configuration command. Santa installation/OS approvals and the
+Mac administrator's enrollment authorization remain separate prerequisites.
+
+An upgrade preserves the live profile and collector, even if the new package has a
+different server default. Partially populated Keychain accounts are treated as
+existing state, not a fresh Mac. An unreadable Keychain or orphaned membership fails
+setup without creating another identity. The installer does not start the collector,
+claim a grant, enable response or enroll Santa automatically.
+
+Without the host variable, the builder produces a manual-setup package. It does not
+create an account profile or inspect Keychain. The explicit
+`agent-configure-account-server` command remains available to an administrator for
+a fresh installation. Existing-device migration requires a separate workflow.
+
+Installer scripts target the running startup volume only. They refuse symlinked,
+non-root-owned or group/other-writable files inside an existing managed installation
+before installing the payload. They do not silently repair or take ownership of an
+unmanaged installation. The live collector configuration, profile and membership
+receipt are never shipped in the package payload.
+
+Current local evidence for this workflow, including the synthetic unsigned candidate,
+is recorded in [the multi-network contract](MULTI_NETWORK_PRODUCT.md). The historical
+signed artifact below does **not** contain these new account-installer changes.
+
+### Signing and historical release evidence
+
 The build signs the native Keychain wrapper and bundled runtime with the hardened runtime,
 signs the installer,
 submits it with `notarytool`, staples the accepted ticket, and verifies the final
@@ -146,3 +259,22 @@ network extension is not used because it requires a paid Workshop subscription.
 
 Do not switch to Lockdown mode until the monitor-mode execution inventory has
 been reviewed, explicit allow rules are deployed, and recovery has been tested.
+
+## Signed 0.4.0 staging candidate
+
+The multi-network/account release line is now `0.4.0`. The current staging
+candidate is
+`dist/macos/staging-20260830-0.4.0-rc3/ControlForge-0.4.0.pkg`, SHA-256
+`c5d6c1ebcaca4401fe9e140abd59a26c648e7e34d130e44308f5a1149dd22813`.
+Apple accepted notarization submission `0b780c68-9ef2-428c-8cb2-e4c39eae2908`;
+stapling, ticket validation, Gatekeeper assessment, strict executable signatures
+and both runtime help smokes passed. The embedded and external manifests match,
+and the package pins `admin-staging.chanakyachowdary.in` as an account-enabled
+**staging** destination.
+
+The manifest deliberately records `source_dirty=true` at commit
+`440f3cbfb91b51f19ae7598e4f746f6b6105460f`. This makes the candidate suitable
+for controlled staging, not customer distribution. A preinstall verifier run on
+this development Mac passed package digest/signing/notarization checks and failed
+the clean-host boundary because an older collector receipt and payload are
+already present. That is correct fail-closed behavior, not clean-Mac proof.

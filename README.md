@@ -81,6 +81,57 @@ controlforge agent --config config/collector.yml
 
 ### Standalone control plane
 
+The in-development multi-network console is available at `/console` after passkey
+sign-in. A fresh bootstrap administrator becomes the platform owner; ordinary
+network admins remain scoped to their own network. Configure
+`CONTROLFORGE_NETWORK_BASE_DOMAIN` for interactive startup, or pass
+`--network-base-domain accounts.example.com` to the module launcher before
+creating account networks. `service-install` persists the validated domain in
+the daemon arguments, so restarts do not depend on shell environment variables.
+Use the same domain option for service status and uninstall. Endpoint
+password accounts have a separate API and cannot access the admin console.
+See the [multi-network product contract](docs/MULTI_NETWORK_PRODUCT.md) for the
+first-login/reset workflow and remaining native, DNS, and deployment gates.
+Creating a namespace does not create a mailbox or publish DNS.
+The owner can separately enable its **Web address** entry point. Enabled addresses
+redirect to one canonical HTTPS sign-in host; subdomains never serve credentials
+or APIs and cannot grant network access. The console explicitly reports public
+DNS/HTTPS as unverified until separately exercised. Direct callers, health probes
+and reverse proxies must preserve the configured Host and use HTTPS to the origin.
+Optional Cloudflare Tunnel ingress uses explicit `--ingress-mode cloudflare-tunnel`
+with `--host 127.0.0.1`. It validates connector client metadata for rate limits,
+not identity; direct mode continues to ignore forwarded headers. The module
+launcher's `tunnel-config` command prints an exact-host configuration snapshot
+without publishing DNS or reading credential values. See the
+[staging ingress runbook](docs/MULTI_NETWORK_PRODUCT.md#staging-ingress-runbook)
+before enabling it; generated configuration is not deployment evidence.
+Existing appliances use the explicit offline `standalone owner status` and
+`standalone owner designate` ceremony; upgrading never promotes an admin implicitly.
+The console supports network pause/resume, scoped team roles, endpoint-account
+enable/disable, and invitation cancellation, with stale-edit and audit safeguards.
+Device connection details show timestamped server evidence and practical next steps
+for missing check-ins, interrupted setup, credential problems and revoked access.
+They do not claim to verify local permissions, malware absence or Santa blocking.
+Device links open an exact, network-scoped case queue. Finding details explain
+the recorded activity, why it deserves review and safe next steps, with the saved
+rule and matched evidence available for verification. These are deterministic
+review aids, not AI verdicts or automatic response actions. Unknown or inaccessible
+network links do not silently open another network's investigations.
+
+The in-development Mac Account section implements sign-in, first-password setup,
+admin-handled reset requests, and a one-time OS-authorized enrollment handoff to
+the existing collector. Account-enabled installers provision a trusted server profile
+on fresh Macs; existing profiles and collectors are preserved during upgrades.
+See [account-enabled installers](docs/macos-production.md#account-enabled-installers).
+Its local compile/contract tests do not establish a signed release, clean-device
+activation, or hosted deployment; those gates are tracked in the product contract.
+The current-source native dashboard uses status v3 to distinguish missing,
+stopped and degraded security components from upload problems. It prioritizes
+network restrictions, labels old observations as historical, and links directly
+to Account setup and contextual Help. Versions v1/v2 remain readable but cannot
+prove the new detailed check results. This UI/status update is not yet a signed
+installer or an update to the installed agent.
+
 Install the standalone dependencies, provide a certificate trusted by the admin browser, and
 keep the WebAuthn origin and relying-party identity stable:
 
@@ -166,7 +217,13 @@ sudo /Library/ControlForge/bin/controlforge agent-containment-release \
 ```
 
 Encrypted operational backups and diagnostics are CLI-accessible while restore requires the
-runtime to be stopped:
+runtime to be stopped. An appliance backup contains **all networks**, not a
+tenant-filtered export. Multi-network manifests authenticate the exact network
+inventory; in-place restore requires the same network set. Recovery into an empty
+database is supported with the preserved appliance secret bundle. Keep that bundle
+and the service/TLS configuration separately protected: database backups do not
+include them. A backup predating a newly created network cannot replace the live
+appliance and silently discard that network.
 
 ```bash
 controlforge standalone backup create \
@@ -251,6 +308,7 @@ The verification target runs:
 - [Production-oriented Cloudflare architecture](docs/production-architecture.md)
 - [Verified Cloudflare deployment evidence](docs/DEPLOYMENT_EVIDENCE.md)
 - [macOS Santa deployment, signing, and notarization](docs/macos-production.md)
+- [Enterprise distribution and release channels](docs/ENTERPRISE_DISTRIBUTION.md)
 - [Standalone 1.0 implementation plan](docs/STANDALONE_1_0_IMPLEMENTATION_PLAN.md)
 - [Standalone 1.0 acceptance evidence](docs/STANDALONE_1_0_ACCEPTANCE.md)
 
@@ -262,6 +320,7 @@ The verification target runs:
 - OpenTelemetry metrics and rule-performance dashboards
 - Broader audit coverage, off-appliance audit anchoring, and scheduled retention operations
 - Trusted-certificate appliance packaging and physical hardware/passkey acceptance
+- Clean, tagged macOS production releases with manifest-pinned MDM distribution
 - Tested operating-system containment adapters and enterprise identity-provider rollout
 
 ## License

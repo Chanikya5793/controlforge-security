@@ -72,7 +72,9 @@ def test_release_ready_mode_fails_closed_while_required_gaps_remain(
 
 
 def test_acceptance_document_names_every_release_stage_and_non_claim(project_root: Path) -> None:
-    document = (project_root / "docs" / "STANDALONE_1_0_ACCEPTANCE.md").read_text(encoding="utf-8")
+    document = " ".join(
+        (project_root / "docs" / "STANDALONE_1_0_ACCEPTANCE.md").read_text(encoding="utf-8").split()
+    )
 
     for stage in (
         "Install",
@@ -90,11 +92,14 @@ def test_acceptance_document_names_every_release_stage_and_non_claim(project_roo
         assert f"| {stage} |" in document
     for required_boundary in (
         "No physical active-response capability is claimed",
-        "signed, notarized, and stapled release candidate",
+        "historical 2026-08-24 artifact",
+        "not a package of the current working tree",
+        "new account-enabled release must target a verified standalone HTTPS account server",
         "trusted-certificate",
         "physical-hardware acceptance",
         "stateful correlation parity",
         "verify_macos_physical_acceptance.py",
         "never requests a Keychain secret value or reads telemetry rows",
     ):
-        assert required_boundary in document
+        assert required_boundary.casefold() in document.casefold()
+    assert "current-source `ControlForge-0.3.0.pkg`" not in document
