@@ -23,7 +23,7 @@ export default function DownloadPage() {
         title="Download with the evidence attached."
         lede="ControlForge is preparing its first clean public preview. Every published installer will include an Apple signature, notarization, immutable checksum, source identity, and human-readable release notes."
       />
-      <section className="download-panel">
+      <section className="download-panel" data-reveal>
         <div className="release-summary">
           <p className="release-state"><span /> Preview candidate</p>
           <h2>ControlForge for Mac</h2>
@@ -46,7 +46,7 @@ export default function DownloadPage() {
           </ol>
         </aside>
       </section>
-      <section className="install-steps">
+      <section className="install-steps" data-reveal>
         <div className="section-heading compact">
           <p className="kicker">The installation path</p>
           <h2>One package. No shared device credential.</h2>

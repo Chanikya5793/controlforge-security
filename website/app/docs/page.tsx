@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import type { CSSProperties } from 'react';
 import { Arrow, PageIntro, SiteFooter, SiteHeader } from '../components';
 
 export const metadata: Metadata = {
@@ -24,7 +25,7 @@ export default function DocsPage() {
       />
       <section className="guide-grid">
         {guides.map(([title, body, label], index) => (
-          <article key={title}>
+          <article key={title} data-reveal style={{ '--reveal-delay': `${(index % 2) * 90}ms` } as CSSProperties}>
             <span className="guide-number">0{index + 1}</span>
             <h2>{title}</h2><p>{body}</p>
             <span className="guide-status">Preview documentation</span>
@@ -32,7 +33,7 @@ export default function DocsPage() {
           </article>
         ))}
       </section>
-      <section className="docs-start">
+      <section className="docs-start" data-reveal>
         <div><p className="kicker light">A complete first connection</p><h2>From a new account to a verified first report.</h2></div>
         <ol>
           <li><span>1</span><div><strong>Administrator creates the endpoint account</strong><p>The one-time initial password is shown once and delivered directly. No email server is required.</p></div></li>
@@ -41,7 +42,7 @@ export default function DocsPage() {
           <li><span>4</span><div><strong>The owner or administrator verifies the first report</strong><p>Connected does not mean healthy. The dashboard keeps reporting, component health, and findings distinct.</p></div></li>
         </ol>
       </section>
-      <section className="github-callout">
+      <section className="github-callout" data-reveal>
         <div><p className="kicker">Engineering reference</p><h2>Need the source-level documentation?</h2><p>The repository contains the architecture, threat model, accepted detection subset, deployment runbooks, and current evidence boundaries.</p></div>
         <a className="button button-quiet" href="https://github.com/Chanikya5793/controlforge-security">Open GitHub <Arrow /></a>
       </section>

@@ -1,19 +1,17 @@
 import Link from 'next/link';
+import type { CSSProperties } from 'react';
 import { Arrow, ShieldMark, SiteFooter, SiteHeader } from './components';
 
 const productPrinciples = [
   {
-    number: '01',
     title: 'Plain language first',
     body: 'See what happened, why it matters, and the next safe step before opening technical evidence.',
   },
   {
-    number: '02',
     title: 'Evidence stays attached',
     body: 'Every finding keeps its rule, matched facts, device context, case history, and audit lineage.',
   },
   {
-    number: '03',
     title: 'Humans keep authority',
     body: 'AI may help summarize evidence. It cannot decide detections or independently change an endpoint.',
   },
@@ -87,21 +85,21 @@ export default function Home() {
         </div>
       </section>
 
-      <div className="audience-strip" aria-label="Product audiences">
+      <div className="audience-strip" aria-label="Product audiences" data-reveal>
         <p>Built for</p><span>Platform owners</span><i />
         <span>Network administrators</span><i />
         <span>Everyday Mac users</span>
       </div>
 
       <section className="section experience" id="how-it-works">
-        <div className="section-heading">
+        <div className="section-heading" data-reveal>
           <p className="kicker">One product, three clear experiences</p>
           <h2>Right information.<br />Right person. Right time.</h2>
           <p>ControlForge separates platform ownership, network administration, and endpoint setup without losing the evidence connecting them.</p>
         </div>
         <div className="role-grid">
-          <article>
-            <span className="role-index">01 — Owner</span>
+          <article data-reveal style={{ '--reveal-delay': '0ms' } as CSSProperties}>
+            <span className="role-index">Platform owner</span>
             <h3>See every network without flattening its boundaries.</h3>
             <p>Create networks, appoint administrators, and move between each network&apos;s devices and cases with one owner identity.</p>
             <div className="mini-network-list">
@@ -110,8 +108,8 @@ export default function Home() {
               <span><i className="network-icon amber-bg">ST</i><b>Studio Team</b><em>9 Macs</em></span>
             </div>
           </article>
-          <article>
-            <span className="role-index">02 — Administrator</span>
+          <article data-reveal style={{ '--reveal-delay': '90ms' } as CSSProperties}>
+            <span className="role-index">Network administrator</span>
             <h3>Run one network with evidence, not guesswork.</h3>
             <p>Connect people and Macs, handle account help, review findings, and preserve a complete audit trail.</p>
             <div className="mini-case">
@@ -121,8 +119,8 @@ export default function Home() {
               <span className="case-action">Review next steps <Arrow /></span>
             </div>
           </article>
-          <article>
-            <span className="role-index">03 — Mac user</span>
+          <article data-reveal style={{ '--reveal-delay': '180ms' } as CSSProperties}>
+            <span className="role-index">Person using a Mac</span>
             <h3>Understand this Mac without seeing the whole SOC.</h3>
             <p>Sign in, connect the Mac, and get a clear status with the next useful step—never raw organization investigations.</p>
             <div className="mini-mac-status">
@@ -134,22 +132,22 @@ export default function Home() {
       </section>
 
       <section className="principles-section">
-        <div className="principles-intro">
+        <div className="principles-intro" data-reveal>
           <p className="kicker light">Built to be trustworthy</p>
           <h2>Security decisions should survive a second look.</h2>
           <p>ControlForge keeps deterministic detection at the boundary and makes every important claim traceable to saved evidence.</p>
           <Link href="/security">Read the security model <Arrow /></Link>
         </div>
         <div className="principles-list">
-          {productPrinciples.map((item) => (
-            <article key={item.number}>
-              <span>{item.number}</span><div><h3>{item.title}</h3><p>{item.body}</p></div>
+          {productPrinciples.map((item, index) => (
+            <article key={item.title} data-reveal style={{ '--reveal-delay': `${index * 90}ms` } as CSSProperties}>
+              <i aria-hidden="true" /><div><h3>{item.title}</h3><p>{item.body}</p></div>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="download-callout" id="download">
+      <section className="download-callout" id="download" data-reveal>
         <div>
           <p className="kicker">ControlForge 0.4 preview</p>
           <h2>Start with one Mac.<br />Prove every step.</h2>

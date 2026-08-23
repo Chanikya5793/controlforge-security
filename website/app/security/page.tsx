@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import type { CSSProperties } from 'react';
 import { PageIntro, SiteFooter, SiteHeader } from '../components';
 
 export const metadata: Metadata = {
@@ -26,10 +27,10 @@ export default function SecurityPage() {
       />
       <section className="trust-grid">
         {boundaries.map(([title, body], index) => (
-          <article key={title}><span>0{index + 1}</span><h2>{title}</h2><p>{body}</p></article>
+          <article key={title} data-reveal style={{ '--reveal-delay': `${(index % 3) * 80}ms` } as CSSProperties}><i aria-hidden="true" /><h2>{title}</h2><p>{body}</p></article>
         ))}
       </section>
-      <section className="claim-boundary">
+      <section className="claim-boundary" data-reveal>
         <div>
           <p className="kicker light">Current product boundary</p>
           <h2>Private preview is a status, not a euphemism.</h2>
@@ -39,7 +40,7 @@ export default function SecurityPage() {
           <p>It does not yet claim general availability, clean-Mac fleet acceptance, enterprise service levels, or autonomous remediation. Those claims stay closed until their evidence exists.</p>
         </div>
       </section>
-      <section className="evidence-table-wrap">
+      <section className="evidence-table-wrap" data-reveal>
         <div className="section-heading compact"><p className="kicker">Release evidence</p><h2>What a downloadable build must carry</h2></div>
         <div className="evidence-table">
           <div><span>Apple assurance</span><strong>Developer ID signature, trusted timestamp, notarization ticket, Gatekeeper acceptance</strong></div>
