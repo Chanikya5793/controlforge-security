@@ -90,10 +90,14 @@ def _trusted_directory(path: Path, expected_uid: int) -> None:
     """Every ancestor must be non-writable and non-symlinked, not just the leaf."""
     for directory in (path, *path.parents):
         metadata = directory.lstat()
+        mode = stat.S_IMODE(metadata.st_mode)
+        is_root_owned_sticky_directory = metadata.st_uid == 0 and bool(
+            mode & stat.S_ISVTX
+        )
         if (
             not stat.S_ISDIR(metadata.st_mode)
             or metadata.st_uid not in {0, expected_uid}
-            or stat.S_IMODE(metadata.st_mode) & 0o022
+            or (mode & 0o022 and not is_root_owned_sticky_directory)
         ):
             raise MacAccountError("account configuration directory is not trusted")
 

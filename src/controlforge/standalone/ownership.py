@@ -23,10 +23,14 @@ class OwnerSetupError(ValueError):
 def require_operator_directory(path: Path) -> None:
     for directory in (path, *path.parents):
         metadata = directory.lstat()
+        mode = stat.S_IMODE(metadata.st_mode)
+        is_root_owned_sticky_directory = metadata.st_uid == 0 and bool(
+            mode & stat.S_ISVTX
+        )
         if (
             not stat.S_ISDIR(metadata.st_mode)
             or metadata.st_uid not in {0, os.geteuid()}
-            or stat.S_IMODE(metadata.st_mode) & 0o022
+            or (mode & 0o022 and not is_root_owned_sticky_directory)
         ):
             raise OwnerSetupError("owner setup requires a trusted operator-owned directory")
 
