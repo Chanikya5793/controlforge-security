@@ -97,7 +97,7 @@ class EndpointAccountService:
             "account_id": account_id,
             "username": username,
             "initial_password": password,
-            "must_change_password": True,
+            "must_change_password": bool(len(password)),
             "expires_at": _utc_text(now + timedelta(days=7)),
         }
 
