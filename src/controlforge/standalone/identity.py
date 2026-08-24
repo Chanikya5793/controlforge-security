@@ -13,7 +13,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Literal, Optional, cast
+from typing import Literal, Optional
 
 from .audit import StandaloneAuditLog
 from .database import StandaloneDatabase
@@ -1180,9 +1180,16 @@ class HumanIdentityService:
     @staticmethod
     def _principal_from_row(row: sqlite3.Row) -> SessionPrincipal:
         role_value = str(row["role"])
-        if role_value not in ROLE_CAPABILITIES:
+        if role_value == "viewer":
+            role: Role = "viewer"
+        elif role_value == "analyst":
+            role = "analyst"
+        elif role_value == "responder":
+            role = "responder"
+        elif role_value == "admin":
+            role = "admin"
+        else:
             raise SessionError("session role is invalid")
-        role = cast(Role, role_value)
         return SessionPrincipal(
             tenant_id=str(row["tenant_id"]),
             user_id=str(row["user_id"]),
