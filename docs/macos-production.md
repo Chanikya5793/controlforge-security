@@ -278,3 +278,27 @@ for controlled staging, not customer distribution. A preinstall verifier run on
 this development Mac passed package digest/signing/notarization checks and failed
 the clean-host boundary because an older collector receipt and payload are
 already present. That is correct fail-closed behavior, not clean-Mac proof.
+
+## Downloadable 0.4.0 public pilot
+
+The public pilot replaces the dirty-source rc3 artifact for download purposes. It
+was built from clean commit `fa34b23cb7b4bce34009bd6d73733548d1deb1b1` with
+`source_dirty=false` and the fixed staging account host
+`admin-staging.chanakyachowdary.in:443`:
+
+- package: `dist/macos/public-pilot-20260830-fa34b23/ControlForge-0.4.0.pkg`;
+- size: 14,774,363 bytes;
+- SHA-256: `e96c42c7865ffe68e1010a1926560089a54342e1745137e23c0e5a7b89ad51be`;
+- Developer ID Installer trusted timestamp: 2026-08-31 00:55:07 UTC;
+- Apple notarization submission: `db9238ff-d8c5-453e-afa4-d67d97db9b8a`, accepted;
+- stapler validation and Gatekeeper `Notarized Developer ID` assessment: passed;
+- external manifest verification against the exact package: passed.
+
+The package and evidence are published at
+`https://controlforge.chanakyachowdary.in/download`. A fresh download was measured
+at the same size and SHA-256 and independently passed `pkgutil`, `stapler`, and
+`spctl` checks. This is public availability of a signed **staging pilot**, not a
+general-availability production release. The development Mac is not a clean host;
+its preinstall verifier correctly failed the existing-receipt and existing-payload
+checks. Clean-Mac lifecycle acceptance and a dedicated production account service
+remain release gates.

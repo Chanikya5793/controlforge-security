@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import type { CSSProperties } from 'react';
-import { Arrow, PageIntro, SiteFooter, SiteHeader } from '../components';
+import { Arrow, PageIntro, SiteShell } from '../components';
 
 export const metadata: Metadata = {
   title: 'ControlForge documentation',
@@ -16,8 +16,7 @@ const guides = [
 
 export default function DocsPage() {
   return (
-    <main>
-      <SiteHeader />
+    <SiteShell>
       <PageIntro
         eyebrow="Documentation"
         title="Start with the job you need to do."
@@ -46,7 +45,6 @@ export default function DocsPage() {
         <div><p className="kicker">Engineering reference</p><h2>Need the source-level documentation?</h2><p>The repository contains the architecture, threat model, accepted detection subset, deployment runbooks, and current evidence boundaries.</p></div>
         <a className="button button-quiet" href="https://github.com/Chanikya5793/controlforge-security">Open GitHub <Arrow /></a>
       </section>
-      <SiteFooter />
-    </main>
+    </SiteShell>
   );
 }

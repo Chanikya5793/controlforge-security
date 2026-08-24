@@ -1,0 +1,45 @@
+ControlForge 0.4.0 public pilot
+================================
+
+Availability
+------------
+This is a controlled staging pilot for Apple Silicon Macs running macOS 13 or
+newer. It is not a general-availability or enterprise-SLA release.
+
+Release identity
+----------------
+Channel: staging
+Source commit: fa34b23cb7b4bce34009bd6d73733548d1deb1b1
+Source dirty: false
+Account service: admin-staging.chanakyachowdary.in:443
+Package SHA-256: e96c42c7865ffe68e1010a1926560089a54342e1745137e23c0e5a7b89ad51be
+Package size: 14,774,363 bytes
+
+Verified before publication
+---------------------------
+- 557 Python tests passed with 88.94 percent coverage.
+- 115 Cloud Worker tests passed with 88.94 percent line coverage.
+- Developer ID Installer signature has a trusted timestamp.
+- Apple notarization was accepted and its ticket was stapled and validated.
+- Gatekeeper classified the package as accepted Notarized Developer ID.
+- The external release manifest matches the downloadable package.
+
+Important pilot boundaries
+--------------------------
+- The package connects to the staging account service, not a production SLA.
+- A network administrator must provide an endpoint account.
+- Santa and its required macOS approvals remain separate prerequisites.
+- Clean-Mac install, reboot, upgrade, rollback, and uninstall acceptance is not
+  yet complete. Start with a non-critical test Mac.
+- Automated containment remains fail-closed and is not enabled by this package.
+
+Verification
+------------
+Run these commands from the folder containing the downloaded package:
+
+  shasum -a 256 ControlForge-0.4.0.pkg
+  pkgutil --check-signature ControlForge-0.4.0.pkg
+  xcrun stapler validate ControlForge-0.4.0.pkg
+  spctl --assess --type install -vv ControlForge-0.4.0.pkg
+
+The measured SHA-256 must exactly equal the value above.

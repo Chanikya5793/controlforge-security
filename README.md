@@ -8,6 +8,16 @@ ControlForge is a security-control assurance, detection, and SOC case-management
 
 It is an engineering portfolio project built with public fixtures plus a live, sanctioned Have I Been Pwned integration. Endpoint-vendor configurations demonstrate extensible control checks; they do **not** imply access to vendor tenants or production customer data. Exposure scans require a domain the operator is authorized to query.
 
+## Website and signed Mac pilot
+
+The product website is live at
+[controlforge.chanakyachowdary.in](https://controlforge.chanakyachowdary.in).
+Its download page publishes the clean-source `0.4.0` Apple Silicon staging pilot,
+the matching release manifest, SHA-256 file, and release notes. The installer is
+Developer ID signed, Apple notarized and stapled. It remains a controlled pilot:
+the account service is staging, and clean-Mac install, reboot, upgrade, rollback,
+uninstall, fleet availability, and service-level acceptance are not yet complete.
+
 ## Why this exists
 
 Security teams need reliable answers to two operational questions:

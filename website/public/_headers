@@ -1,0 +1,11 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  X-Frame-Options: DENY
+
+/downloads/0.4.0-pilot-fa34b23/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/downloads/0.4.0-pilot-fa34b23/ControlForge-0.4.0.pkg
+  Content-Disposition: attachment

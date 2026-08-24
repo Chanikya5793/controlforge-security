@@ -386,3 +386,35 @@ acceptance report at `/tmp/controlforge-standalone-acceptance-20260824.json` rec
 implemented checks and five explicit unverified physical/environment boundaries. The complete
 current-source gate passes 297 Python tests at 87.53 percent coverage, and the Cloud gate passes
 115 tests at 88.94 percent line coverage.
+
+## Cloudflare marketing site and signed public pilot - 2026-08-30
+
+The marketing site was deployed as Cloudflare Worker `controlforge-marketing` at
+`https://controlforge.chanakyachowdary.in`, version
+`cb91880c-1c4f-41b6-acc8-19ed031487f3`. Live checks returned HTTP 200 for `/`,
+`/download`, `/security`, and `/docs`, and the custom missing route returned 404.
+The production Open Graph image resolves from the same custom origin. Lighthouse
+accessibility scoring was 100 for both the homepage and download page; the narrow
+layout had no horizontal document overflow, the first keyboard focus was the skip
+link, and main, banner, and content-info landmarks were present.
+
+Before signing, the exact clean commit `fa34b23cb7b4bce34009bd6d73733548d1deb1b1`
+passed the complete Python gate with 557 tests and 88.94 percent coverage, Bandit
+with zero findings, strict MyPy, Ruff and package builds. The Cloud gate passed 115
+tests with 88.94 percent line coverage. The website passed ESLint, its production
+build and an npm audit with zero known vulnerabilities.
+
+The downloadable staging pilot is 14,774,363 bytes with SHA-256
+`e96c42c7865ffe68e1010a1926560089a54342e1745137e23c0e5a7b89ad51be`.
+Its manifest records `source_dirty=false`, the exact commit above, `arm64`, macOS
+13.0 or newer, staging channel, and `admin-staging.chanakyachowdary.in:443`. Apple
+accepted notarization submission `db9238ff-d8c5-453e-afa4-d67d97db9b8a`; stapling,
+ticket validation, trusted Developer ID Installer signature and Gatekeeper assessment
+passed. A fresh HTTPS download from the custom domain reproduced the exact byte size
+and SHA-256 and independently passed `pkgutil`, `stapler`, and `spctl`.
+
+This establishes a publicly downloadable signed **pilot**, not production or general
+availability. The current Mac already contains an older ControlForge receipt and
+payload, so the physical preinstall verifier correctly failed those two clean-host
+checks. Clean-Mac install/reboot/upgrade/rollback/uninstall evidence, dedicated
+always-on account-service architecture, fleet scale and service objectives remain open.

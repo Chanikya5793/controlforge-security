@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { CSSProperties } from 'react';
-import { Arrow, ShieldMark, SiteFooter, SiteHeader } from './components';
+import { Arrow, ShieldMark, SiteShell } from './components';
 
 const productPrinciples = [
   {
@@ -19,11 +19,10 @@ const productPrinciples = [
 
 export default function Home() {
   return (
-    <main>
-      <SiteHeader />
+    <SiteShell>
       <section className="hero" id="top">
         <div className="hero-copy">
-          <p className="eyebrow"><span /> Private preview for Apple Silicon</p>
+          <p className="eyebrow"><span /> Signed public pilot for Apple Silicon</p>
           <h1>Mac security your whole team can understand.</h1>
           <p className="hero-lede">
             Know which Macs are reporting, what needs attention, and what to do
@@ -34,7 +33,7 @@ export default function Home() {
               Explore ControlForge <Arrow />
             </a>
             <Link className="button button-quiet" href="/download">
-              Preview the download
+              Download the pilot
             </Link>
           </div>
           <ul className="proof-list" aria-label="Release assurances">
@@ -55,16 +54,16 @@ export default function Home() {
               <p className="nav-label">Network</p>
               <div className="network-switcher"><span>CF</span><b>ControlForge Pilot</b><small>Owner view</small></div>
               <p className="nav-label nav-space">Workspace</p>
-              <a className="active" href="#product"><span>⌂</span> Overview</a>
-              <a href="#product"><span>◇</span> Devices <em>42</em></a>
-              <a href="#product"><span>!</span> Findings <em className="alert-count">3</em></a>
-              <a href="#product"><span>□</span> Cases</a>
-              <a href="#product"><span>◎</span> People</a>
+              <span className="app-nav-item active"><span>⌂</span> Overview</span>
+              <span className="app-nav-item"><span>◇</span> Devices <em>42</em></span>
+              <span className="app-nav-item"><span>!</span> Findings <em className="alert-count">3</em></span>
+              <span className="app-nav-item"><span>□</span> Cases</span>
+              <span className="app-nav-item"><span>◎</span> People</span>
             </aside>
             <div className="app-content">
               <div className="overview-heading">
                 <div><p>Sunday, August 30</p><h2>Your network at a glance</h2></div>
-                <button type="button">Add a Mac</button>
+                <span className="mock-button">Add a Mac</span>
               </div>
               <div className="posture-card">
                 <div className="posture-score"><span>93</span><small>/ 100</small></div>
@@ -78,7 +77,7 @@ export default function Home() {
               </div>
               <div className="attention-card">
                 <div><p className="status-label amber">Needs attention</p><h3>One security component stopped reporting</h3><p>Finance MacBook Pro · Last verified 18 minutes ago</p></div>
-                <a href="#product">Review evidence <Arrow /></a>
+                <span className="mock-link">Review evidence <Arrow /></span>
               </div>
             </div>
           </div>
@@ -151,14 +150,13 @@ export default function Home() {
         <div>
           <p className="kicker">ControlForge 0.4 preview</p>
           <h2>Start with one Mac.<br />Prove every step.</h2>
-          <p>The signed preview is being prepared for controlled Apple Silicon pilots. See exactly what is verified before installing.</p>
+          <p>A clean-source, Apple-signed pilot is available for controlled Apple Silicon testing. See exactly what is verified—and what remains—before installing.</p>
         </div>
         <div className="download-actions">
           <Link className="button button-primary" href="/download">Open the download page <Arrow /></Link>
           <Link href="/docs">Read installation guidance</Link>
         </div>
       </section>
-      <SiteFooter />
-    </main>
+    </SiteShell>
   );
 }

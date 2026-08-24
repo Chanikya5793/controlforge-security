@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 
 export const ShieldMark = () => (
   <span className="shield-mark" aria-hidden="true">
@@ -22,7 +23,7 @@ export function SiteHeader() {
         <Link href="/docs">Docs</Link>
       </nav>
       <Link className="header-action" href="/download">
-        Get the preview <Arrow />
+        Download <Arrow />
       </Link>
     </header>
   );
@@ -49,11 +50,22 @@ export function SiteFooter() {
       </div>
       <div className="footer-note">
         <p className="footer-label">Current availability</p>
-        <strong>Private preview</strong>
-        <p>For controlled Apple Silicon Mac pilots. Production readiness is not yet claimed.</p>
+        <strong>Signed public pilot</strong>
+        <p>For controlled Apple Silicon Mac pilots. General availability is not yet claimed.</p>
       </div>
       <p className="copyright">© 2026 ControlForge. Deterministic detections remain the security decision boundary.</p>
     </footer>
+  );
+}
+
+export function SiteShell({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <SiteHeader />
+      <main id="main-content">{children}</main>
+      <SiteFooter />
+    </>
   );
 }
 

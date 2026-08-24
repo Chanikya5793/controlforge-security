@@ -7,9 +7,10 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build": "vinext build",
+    "build": "vinext build && cp worker-entry.js dist/server/worker-entry.js",
     "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "deploy:cloudflare": "npm run build && wrangler deploy --config wrangler.cloudflare.jsonc"
   },
   "dependencies": {
     "next": "16.3.3",

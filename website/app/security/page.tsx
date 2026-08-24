@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import type { CSSProperties } from 'react';
-import { PageIntro, SiteFooter, SiteHeader } from '../components';
+import { PageIntro, SiteShell } from '../components';
 
 export const metadata: Metadata = {
   title: 'Security and trust — ControlForge',
@@ -18,8 +18,7 @@ const boundaries = [
 
 export default function SecurityPage() {
   return (
-    <main>
-      <SiteHeader />
+    <SiteShell>
       <PageIntro
         eyebrow="Security and trust"
         title="Boundaries that are visible, testable, and difficult to bypass."
@@ -33,7 +32,7 @@ export default function SecurityPage() {
       <section className="claim-boundary" data-reveal>
         <div>
           <p className="kicker light">Current product boundary</p>
-          <h2>Private preview is a status, not a euphemism.</h2>
+          <h2>A signed pilot is a status, not a production claim.</h2>
         </div>
         <div>
           <p>ControlForge currently has a signed and notarized staging package, tested multi-network authorization, passkey administration, endpoint enrollment, and deterministic investigation workflows.</p>
@@ -49,7 +48,6 @@ export default function SecurityPage() {
           <div><span>Acceptance assurance</span><strong>Fresh install, first report, upgrade, rollback, and uninstall results kept separate from build tests</strong></div>
         </div>
       </section>
-      <SiteFooter />
-    </main>
+    </SiteShell>
   );
 }

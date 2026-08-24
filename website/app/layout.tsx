@@ -21,7 +21,7 @@ const utility = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://controlforge-security.chanikya6163.chatgpt.site'),
+  metadataBase: new URL('https://controlforge.chanakyachowdary.in'),
   title: 'ControlForge — Mac security your whole team can understand',
   description:
     'Know which Macs are reporting, what needs attention, and what to do next with evidence-first security operations.',
