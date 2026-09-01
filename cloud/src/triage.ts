@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { appendAudit } from "./repository";
+import { prepareAuditStatement } from "./repository";
 import { triageAssessmentSchema, type TriageAssessment } from "./schemas";
 import type { AlertRow, AuthenticatedPrincipal, Env } from "./types";
 
@@ -140,7 +140,7 @@ export async function triageAlert(
 
   const assessmentId = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  await env.DB.prepare(
+  const insert = env.DB.prepare(
     `INSERT INTO triage_assessments(
        tenant_id, assessment_id, alert_id, model, assessment_json, created_by, created_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -152,11 +152,21 @@ export async function triageAlert(
     JSON.stringify(assessment),
     principal.id,
     createdAt,
-  ).run();
-  await appendAudit(env, alert.tenant_id, "alert.triaged", principal, "alert", alert.alert_id, {
-    assessment_id: assessmentId,
-    model: providerResult.model,
-    evidence_refs: assessment.evidence_refs,
-  });
+  );
+  const audit = await prepareAuditStatement(
+    env,
+    alert.tenant_id,
+    "alert.triaged",
+    principal,
+    "alert",
+    alert.alert_id,
+    {
+      assessment_id: assessmentId,
+      model: providerResult.model,
+      evidence_refs: assessment.evidence_refs,
+    },
+    true,
+  );
+  await env.DB.batch([insert, audit]);
   return { assessment_id: assessmentId, assessment, model: providerResult.model };
 }

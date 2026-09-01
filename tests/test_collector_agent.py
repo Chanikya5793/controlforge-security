@@ -96,6 +96,17 @@ class RecordingCredentialPairStore:
         self.replacements.append((expected_credential_id, credential_id, credential_secret))
 
 
+class FixedClock:
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, seconds: int) -> None:
+        self.now += timedelta(seconds=seconds)
+
+
 def definition(project_root, tmp_path) -> CollectorDefinition:  # type: ignore[no-untyped-def]
     return CollectorDefinition(
         api_host="controlforge-soc.example.workers.dev",
@@ -113,6 +124,24 @@ def event() -> SecurityEvent:
         timestamp=datetime(2026, 8, 18, 6, 0, tzinfo=timezone.utc),
         actor="device:device-test-1",
         attributes={"status": "healthy"},
+    )
+
+
+def report(status: ControlStatus = ControlStatus.HEALTHY) -> ControlReport:
+    return ControlReport(
+        hostname="synthetic",
+        platform="darwin",
+        findings=[
+            ControlFinding(
+                agent_id="santa",
+                display_name="Santa",
+                status=status,
+                installed=True,
+                running=status != ControlStatus.FAILED,
+                evidence=["synthetic"],
+                recommended_action="Inspect the synthetic fixture.",
+            )
+        ],
     )
 
 
@@ -299,6 +328,296 @@ def test_spool_retries_without_persisting_credentials(tmp_path) -> None:  # type
 
     spool.acknowledge(batch_id)
     assert spool.pending() == []
+
+
+def test_retry_circuit_is_persistent_exponential_jittered_and_bounded(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    spool_path = tmp_path / "spool.db"
+    spool = AgentSpool(spool_path)
+    now = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+
+    first = spool.record_retry_failure(
+        "delivery",
+        now=now,
+        initial_seconds=60,
+        maximum_seconds=3600,
+        jitter_ratio=0.2,
+        jitter_key="device-test-1",
+    )
+    assert first.consecutive_failures == 1
+    assert now + timedelta(seconds=48) <= first.retry_after <= now + timedelta(seconds=72)
+    assert AgentSpool(spool_path).retry_state("delivery") == first
+    assert spool.retry_ready("delivery", first.retry_after - timedelta(seconds=1)) is False
+    assert spool.retry_ready("delivery", first.retry_after) is True
+
+    current = first
+    for _ in range(20):
+        failure_time = current.retry_after
+        current = spool.record_retry_failure(
+            "delivery",
+            now=failure_time,
+            initial_seconds=60,
+            maximum_seconds=3600,
+            jitter_ratio=0.2,
+            jitter_key="device-test-1",
+        )
+        assert timedelta(seconds=1) <= current.retry_after - failure_time
+        assert current.retry_after - failure_time <= timedelta(seconds=3600)
+    assert current.consecutive_failures == 21
+
+    spool.clear_retry_state("delivery")
+    assert AgentSpool(spool_path).retry_state("delivery") is None
+
+
+def test_outage_circuits_isolate_delivery_and_action_polling_across_restarts(
+    project_root, tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    secret = "s" * 48
+    now = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+    clock = FixedClock(now)
+    collector_definition = definition(project_root, tmp_path).model_copy(
+        update={
+            "retry_backoff_initial_seconds": 60,
+            "retry_backoff_max_seconds": 3600,
+            "retry_backoff_jitter_ratio": 0.0,
+        }
+    )
+    spool = AgentSpool(collector_definition.spool_path)
+    failing_transport = FixtureTransport(
+        secret,
+        {
+            ("POST", "/v1/ingest/events"): (500, b'{"detail":"database full"}'),
+            ("GET", "/v1/agent/actions?device_id=device-test-1"): (
+                500,
+                b'{"detail":"database full"}',
+            ),
+        },
+    )
+    first_agent = EndpointCollectorAgent(
+        collector_definition,
+        SignedControlForgeClient(
+            collector_definition,
+            "3970e11f-f87c-4e14-9a90-d574cd2bcd95",
+            secret,
+            transport=failing_transport,
+        ),
+        spool,
+        clock=clock,
+    )
+    monkeypatch.setattr(first_agent, "_control_report", report)
+
+    first = first_agent.run_once()
+
+    assert first["batches_pending"] == 1
+    assert [request[:2] for request in failing_transport.requests] == [
+        ("POST", "/v1/ingest/events"),
+        ("GET", "/v1/agent/actions?device_id=device-test-1"),
+    ]
+    assert spool.retry_state("delivery").retry_after == now + timedelta(seconds=60)  # type: ignore[union-attr]
+    assert spool.retry_state("action_polling").retry_after == now + timedelta(seconds=60)  # type: ignore[union-attr]
+
+    clock.advance(30)
+    deferred_transport = FixtureTransport(secret, {})
+    second_agent = EndpointCollectorAgent(
+        collector_definition,
+        SignedControlForgeClient(
+            collector_definition,
+            "3970e11f-f87c-4e14-9a90-d574cd2bcd95",
+            secret,
+            transport=deferred_transport,
+        ),
+        AgentSpool(collector_definition.spool_path),
+        clock=clock,
+    )
+    monkeypatch.setattr(second_agent, "_control_report", report)
+    second = second_agent.run_once()
+
+    assert deferred_transport.requests == []
+    assert second["events_collected"] == 0
+    assert second["batches_pending"] == 1
+    stored = json.loads(collector_definition.status_snapshot_path.read_text())
+    assert stored["run_status"] == "failed"
+    assert stored["failure_stage"] == "action_polling"
+    assert stored["delivery"]["status"] == "backlogged"
+
+    clock.advance(31)
+    recovered_transport = FixtureTransport(
+        secret,
+        {
+            ("POST", "/v1/ingest/events"): (202, b'{"accepted":1}'),
+            ("GET", "/v1/agent/actions?device_id=device-test-1"): (
+                200,
+                b'{"actions":[]}',
+            ),
+        },
+    )
+    recovered_agent = EndpointCollectorAgent(
+        collector_definition,
+        SignedControlForgeClient(
+            collector_definition,
+            "3970e11f-f87c-4e14-9a90-d574cd2bcd95",
+            secret,
+            transport=recovered_transport,
+        ),
+        AgentSpool(collector_definition.spool_path),
+        clock=clock,
+    )
+    monkeypatch.setattr(recovered_agent, "_control_report", report)
+    recovered = recovered_agent.run_once()
+
+    assert recovered["batches_delivered"] == 1
+    assert recovered["batches_pending"] == 0
+    assert spool.retry_state("delivery") is None
+    assert spool.retry_state("action_polling") is None
+    stored = json.loads(collector_definition.status_snapshot_path.read_text())
+    assert stored["run_status"] == "completed"
+    assert stored["failure_stage"] is None
+
+
+def test_unchanged_control_snapshot_does_not_grow_spool_but_transition_is_retained(
+    project_root, tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    secret = "s" * 48
+    clock = FixedClock(datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc))
+    collector_definition = definition(project_root, tmp_path).model_copy(
+        update={
+            "action_polling_enabled": False,
+            "retry_backoff_initial_seconds": 3600,
+            "retry_backoff_max_seconds": 3600,
+            "retry_backoff_jitter_ratio": 0.0,
+        }
+    )
+    transport = FixtureTransport(
+        secret,
+        {("POST", "/v1/ingest/events"): (503, b'{"error":"unavailable"}')},
+    )
+    spool = AgentSpool(collector_definition.spool_path)
+    agent = EndpointCollectorAgent(
+        collector_definition,
+        SignedControlForgeClient(
+            collector_definition,
+            "3970e11f-f87c-4e14-9a90-d574cd2bcd95",
+            secret,
+            transport=transport,
+        ),
+        spool,
+        clock=clock,
+    )
+    monkeypatch.setattr(agent, "_control_report", report)
+    agent.run_once()
+
+    for _ in range(10):
+        clock.advance(60)
+        agent.run_once()
+    assert spool.pending_summary() == (1, False)
+    assert len(transport.requests) == 1
+
+    monkeypatch.setattr(agent, "_control_report", lambda: report(ControlStatus.FAILED))
+    changed = agent.run_once()
+
+    assert changed["events_collected"] == 1
+    assert spool.pending_summary() == (2, False)
+    statuses = [
+        batch_events[0].attributes["status"] for _, batch_events in spool.pending(limit=100)
+    ]
+    assert statuses == ["healthy", "failed"]
+
+
+def test_control_snapshot_fingerprint_ignores_clock_drift_but_retains_evidence_changes() -> None:
+    baseline = report()
+    first_finding = baseline.findings[0].model_copy(
+        update={
+            "heartbeat_age_seconds": 10,
+            "evidence": ["installed path: /one", "heartbeat age: 10s"],
+        }
+    )
+    later_finding = first_finding.model_copy(
+        update={
+            "heartbeat_age_seconds": 20,
+            "evidence": ["installed path: /one", "heartbeat age: 20s"],
+        }
+    )
+    changed_finding = later_finding.model_copy(
+        update={"evidence": ["installed path: /two", "heartbeat age: 20s"]}
+    )
+
+    first = baseline.model_copy(update={"findings": [first_finding]})
+    later = baseline.model_copy(update={"findings": [later_finding]})
+    changed = baseline.model_copy(update={"findings": [changed_finding]})
+
+    assert EndpointCollectorAgent._control_snapshot_fingerprint(first) == (
+        EndpointCollectorAgent._control_snapshot_fingerprint(later)
+    )
+    assert EndpointCollectorAgent._control_snapshot_fingerprint(later) != (
+        EndpointCollectorAgent._control_snapshot_fingerprint(changed)
+    )
+
+
+def test_network_failure_is_redacted_and_does_not_escape_the_delivery_boundary(
+    project_root, tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    class NetworkFailureTransport:
+        def request(self, method, path, headers, body, timeout_seconds):  # type: ignore[no-untyped-def]
+            raise OSError("sensitive-network-detail")
+
+    secret = "s" * 48
+    collector_definition = definition(project_root, tmp_path).model_copy(
+        update={"action_polling_enabled": False}
+    )
+    spool = AgentSpool(collector_definition.spool_path)
+    agent = EndpointCollectorAgent(
+        collector_definition,
+        SignedControlForgeClient(
+            collector_definition,
+            "3970e11f-f87c-4e14-9a90-d574cd2bcd95",
+            secret,
+            transport=NetworkFailureTransport(),
+        ),
+        spool,
+    )
+    monkeypatch.setattr(agent, "_control_report", report)
+
+    result = agent.run_once()
+
+    assert result["batches_pending"] == 1
+    stored = collector_definition.status_snapshot_path.read_bytes()
+    assert b"sensitive-network-detail" not in stored
+    assert b"sensitive-network-detail" not in collector_definition.spool_path.read_bytes()
+
+
+def test_flush_limit_is_configurable_and_hard_capped(project_root, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    secret = "s" * 48
+    collector_definition = definition(project_root, tmp_path).model_copy(
+        update={"delivery_flush_batch_limit": 25}
+    )
+    spool = AgentSpool(collector_definition.spool_path)
+    for _ in range(30):
+        spool.enqueue([event()])
+    transport = FixtureTransport(
+        secret,
+        {("POST", "/v1/ingest/events"): (202, b'{"accepted":1}')},
+    )
+    agent = EndpointCollectorAgent(
+        collector_definition,
+        SignedControlForgeClient(
+            collector_definition,
+            "3970e11f-f87c-4e14-9a90-d574cd2bcd95",
+            secret,
+            transport=transport,
+        ),
+        spool,
+    )
+
+    flushed = agent._flush(datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc))
+
+    assert flushed.delivered == 25
+    assert flushed.pending == 5
+    assert len(transport.requests) == 25
+    with pytest.raises(ValueError, match="less than or equal to 100"):
+        CollectorDefinition(
+            api_host="soc.example.com",
+            device_id="device-test-1",
+            delivery_flush_batch_limit=101,
+        )
 
 
 def test_status_v3_projects_real_component_failures_without_private_evidence(
@@ -548,7 +867,9 @@ def test_status_snapshot_reports_honest_pending_lower_bound(project_root, tmp_pa
     }
 
 
-def test_failed_agent_run_still_persists_a_redacted_status(project_root, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_action_polling_failure_is_isolated_and_persists_redacted_status(
+    project_root, tmp_path
+) -> None:  # type: ignore[no-untyped-def]
     secret = "s" * 48
     collector_definition = definition(project_root, tmp_path)
     transport = FixtureTransport(
@@ -568,12 +889,12 @@ def test_failed_agent_run_still_persists_a_redacted_status(project_root, tmp_pat
         transport=transport,
     )
 
-    with pytest.raises(CollectorError, match="HTTP 503"):
-        EndpointCollectorAgent(collector_definition, client).run_once()
+    result = EndpointCollectorAgent(collector_definition, client).run_once()
 
     status_path = collector_definition.status_snapshot_path
     assert status_path is not None
     stored = json.loads(status_path.read_text(encoding="utf-8"))
+    assert result["actions_processed"] == 0
     assert stored["run_status"] == "failed"
     assert stored["failure_stage"] == "action_polling"
     assert stored["delivery"]["status"] == "succeeded"
@@ -909,5 +1230,6 @@ def test_agent_spools_santa_events_and_persists_cursor(project_root, tmp_path) -
         spool,
         santa_reader,
     ).run_once()
-    assert second["events_collected"] == 3
+    assert second["events_collected"] == 0
     assert second["santa_events_collected"] == 0
+    assert [request[:2] for request in transport.requests].count(("POST", "/v1/ingest/events")) == 1

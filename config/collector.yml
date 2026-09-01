@@ -9,6 +9,11 @@ keychain_service: com.controlforge.collector.v2
 access_proxy_required: true
 action_polling_enabled: true
 credential_rotation_enabled: false
+control_snapshot_interval_seconds: 3600
+delivery_flush_batch_limit: 25
+retry_backoff_initial_seconds: 60
+retry_backoff_max_seconds: 3600
+retry_backoff_jitter_ratio: 0.2
 response_adapter_enabled: false
 response_state_path: /Library/Application Support/ControlForge/response/pf-state.json
 santa:

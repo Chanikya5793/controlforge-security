@@ -4,6 +4,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-18",
   "compatibility_flags": ["nodejs_compat"],
+  "limits": {
+    "cpu_ms": 500
+  },
   "workers_dev": true,
   "preview_urls": false,
   "routes": [
@@ -18,7 +21,14 @@
     "META_MODEL": "muse-spark-1.2-contributor",
     "GEMINI_MODEL": "gemini-3.5-flash",
     "ACCESS_TEAM_DOMAIN": "falling-poetry-892e.cloudflareaccess.com",
-    "ACCESS_AUD": "c808f3798beb8a8720ba2bdce888d712bfe7bde4e17b0063eac3f178eb51da27"
+    "ACCESS_AUD": "c808f3798beb8a8720ba2bdce888d712bfe7bde4e17b0063eac3f178eb51da27",
+    "EVENT_RETENTION_DAYS": "7",
+    "RETENTION_BATCH_SIZE": "200",
+    "RETENTION_MAX_BATCHES_PER_RUN": "5",
+    "TENANT_INGEST_EVENTS_PER_MINUTE": "5000",
+    "DEVICE_INGEST_EVENTS_PER_MINUTE": "2000",
+    "D1_MAX_DATABASE_BYTES": "10000000000",
+    "D1_CAPACITY_WRITE_STOP_PERCENT": "90"
   },
   "d1_databases": [
     {
@@ -47,9 +57,9 @@
   },
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1
+    "head_sampling_rate": 0.05
   },
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    "crons": ["* * * * *"]
   }
 }

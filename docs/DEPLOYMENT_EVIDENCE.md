@@ -1,6 +1,8 @@
-# ControlForge 0.3 deployment evidence
+# ControlForge deployment evidence
 
-Verified through 2026-08-20 in the `Chanakya Chowdary` Cloudflare account.
+Evidence checkpoints are verified through 2026-09-01 in the `Chanakya Chowdary`
+Cloudflare account. Each section is historical and remains bound to its stated artifact,
+deployment identifier, and time.
 
 ## Runtime
 
@@ -418,3 +420,79 @@ availability. The current Mac already contains an older ControlForge receipt and
 payload, so the physical preinstall verifier correctly failed those two clean-host
 checks. Clean-Mac install/reboot/upgrade/rollback/uninstall evidence, dedicated
 always-on account-service architecture, fleet scale and service objectives remain open.
+
+## 0.5.0 operational-safety staging checkpoint - 2026-09-01
+
+This checkpoint advances the source release line and public staging pilot to `0.5.0`.
+The installed Mac still contains the historical collector and therefore does not yet run
+the collector-resilience source described in this section.
+
+Before applying the operational-safety migration, production D1 was exported to the
+ignored local path
+`dist/cloud-backups/controlforge-production-pre-retention-20260831.sql`. The file is
+350,991,564 bytes, has SHA-256
+`8d2e1e96e9ad50b9293d5e1b0fa5b3d9f259f320176000bfe4ba4fbb9a5dd96f`, and is restricted
+to owner-only mode inside an owner-only directory. A separate SQLite restore check
+reported `ok`, 17 tables, seven recorded migrations, and 287,111 events. The export
+contains production data and must not be committed or shared. FileVault was disabled on
+the backup Mac at this checkpoint, so filesystem permissions do not constitute encrypted
+at-rest recovery storage.
+
+D1 migration `0008_operational_safety.sql` applied successfully. Worker version
+`944f2d98-5bbf-4c20-9271-3f20ccbf2c07` established the operational-safety recovery,
+and version `0f25e282-d4b0-4993-bcf9-32b78d724b8e` then deployed the matching `0.5.0`
+runtime metadata at 100 percent traffic. Its deployed bounds include:
+
+- a 500 ms Worker CPU ceiling and five-percent observability sampling;
+- database-enforced ingest budgets of 5,000 events per tenant per minute and 2,000 per
+  device per minute, with the entire batch rolled back when either budget is exceeded;
+- a configured 10,000,000,000-byte D1 capacity reference and a write stop at 90 percent;
+- direct-D1 recovery capped at 500 safe Santa rows plus 50 general rows per run, with
+  concurrency bounded at 20;
+- a one-minute scheduler for recovery, while retention keeps its own persisted cadence;
+- seven-day selective retention in batches of 200, at most five batches per run, only for
+  terminal error-free events that are not referenced by an alert; and
+- atomic alert/case mutation and integrity-audit writes, so an audit failure rolls the
+  protected mutation back instead of leaving unaudited state.
+
+A live Worker tail after redeployment showed successful scheduled, ingest, action-poll,
+and Queue-consumer executions without the prior CPU-limit failure. Each of the first two
+retention runs deleted 1,000 eligible events, recorded no retention error, and left
+referenced, unprocessed, and processing-error rows outside the deletion set.
+
+The paid-plan cutover allowed the installed signed collector to drain its retained local
+spool to zero batches. This proves recovery of the historical `0.4.0` collector, not
+installation of `0.5.0`. Its flush inserted a larger durable D1 backlog. Production fell
+from 66,877 pending rows to 62,707 at `2026-09-01T06:30:46Z`, then to 15,707 at the
+post-deployment check, with zero processing errors throughout. The latest pending window
+ran from `2026-09-01T04:22:38.592Z` through `2026-09-01T06:13:52.926Z`; D1 size was
+697,270,272 bytes. This proves sustained downward recovery, not a drained backlog or a
+completed soak test.
+
+The `0.5.0` collector source adds independent SQLite-persisted delivery and action-polling
+retry circuits, exponential delays from 60 seconds to one hour with deterministic bounded
+jitter, generic socket-error redaction, bounded per-cycle flushing, and coalescing of only
+unchanged control snapshots while preserving raw Santa telemetry and every observed state
+transition. The source gates passed:
+
+- 563 Python tests at 88.97 percent coverage, Ruff, strict MyPy, Bandit with zero findings,
+  and wheel/source-distribution builds;
+- 123 Cloudflare Worker tests at 88.21 percent line coverage, ESLint, strict TypeScript,
+  and dependency audit with zero known vulnerabilities; and
+- website lint, production build, and dependency audit with zero known vulnerabilities.
+
+The public `ControlForge-0.5.0.pkg` was built from clean commit
+`a5f3b6bd08ecf611d13507fe64a62094f6f0ccab` for
+`admin-staging.chanakyachowdary.in:443`. It is 14,776,985 bytes with SHA-256
+`d6eaf51fdeaa5e9d9997f3019645d0b33ee757095127a18d942da8e0b0685277`. Apple accepted
+notarization submission `74bd0fc6-e79f-4619-a096-79d6eda4c202`; the trusted Developer ID
+signature, stapled ticket, manifest and Gatekeeper assessment passed. Marketing Worker
+version `2b723c87-11fc-4ac6-b83e-35c411b9e5f8` published the package and evidence. A fresh
+HTTPS download reproduced the exact digest and independently passed manifest, signature,
+staple and Gatekeeper checks. The clean-host preinstall checks remain open because this
+development Mac already contains an older receipt and payload.
+
+Cloudflare billing showed a zero current/projected total and a $10 budget alert during this
+checkpoint. A budget alert is notification-only rather than a hard spending cap. The explicit
+CPU, sampling, admission, capacity, recovery, and retention bounds reduce accidental spend;
+they do not make paid usage free or replace daily usage review during backlog recovery.

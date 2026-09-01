@@ -8,14 +8,14 @@ export const metadata: Metadata = {
 };
 
 const releaseFacts = [
-  ['Release', '0.4.0 public pilot'],
+  ['Release', '0.5.0 public pilot'],
   ['Hardware', 'Apple Silicon'],
   ['System', 'macOS 13 or newer'],
   ['Download', '14.8 MB signed PKG'],
 ];
 
-const releaseBase = '/downloads/0.4.0-pilot-fa34b23';
-const checksum = 'e96c42c7865ffe68e1010a1926560089a54342e1745137e23c0e5a7b89ad51be';
+const releaseBase = '/downloads/0.5.0-pilot-a5f3b6b';
+const checksum = 'd6eaf51fdeaa5e9d9997f3019645d0b33ee757095127a18d942da8e0b0685277';
 
 export default function DownloadPage() {
   return (
@@ -29,15 +29,15 @@ export default function DownloadPage() {
         <div className="release-summary">
           <p className="release-state release-live"><span /> Available now</p>
           <h2>ControlForge for Mac</h2>
-          <p className="release-version">Version 0.4.0 · staging pilot · Apple Silicon</p>
+          <p className="release-version">Version 0.5.0 · staging pilot · Apple Silicon</p>
           <div className="release-facts">
             {releaseFacts.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
           </div>
-          <a className="button button-primary download-button" href={`${releaseBase}/ControlForge-0.4.0.pkg`} download>
+          <a className="button button-primary download-button" href={`${releaseBase}/ControlForge-0.5.0.pkg`} download>
             Download signed pilot <Arrow />
           </a>
           <div className="release-links" aria-label="Release evidence downloads">
-            <a href={`${releaseBase}/ControlForge-0.4.0.release.json`}>Release manifest</a>
+            <a href={`${releaseBase}/ControlForge-0.5.0.release.json`}>Release manifest</a>
             <a href={`${releaseBase}/SHA256SUMS.txt`}>SHA-256 file</a>
             <a href={`${releaseBase}/RELEASE-NOTES.txt`}>Release notes</a>
           </div>
@@ -46,9 +46,9 @@ export default function DownloadPage() {
         <aside className="verification-card">
           <p className="kicker">Evidence for this exact file</p>
           <ol>
-            <li><span>✓</span><div><strong>Clean source</strong><p>Built from commit <code>fa34b23</code> with <code>source_dirty=false</code>.</p></div></li>
+            <li><span>✓</span><div><strong>Clean source</strong><p>Built from commit <code>a5f3b6b</code> with <code>source_dirty=false</code>.</p></div></li>
             <li><span>✓</span><div><strong>Apple verified</strong><p>Developer ID signed, notarized, stapled, and Gatekeeper accepted.</p></div></li>
-            <li><span>✓</span><div><strong>Tests passed</strong><p>557 Python tests and 115 Worker tests passed before signing.</p></div></li>
+            <li><span>✓</span><div><strong>Tests passed</strong><p>563 Python tests and 123 Worker tests passed before signing.</p></div></li>
             <li><span>!</span><div><strong>Pilot boundary</strong><p>Clean-Mac install, upgrade, rollback, and uninstall evidence is still pending.</p></div></li>
           </ol>
         </aside>
@@ -57,7 +57,7 @@ export default function DownloadPage() {
         <div>
           <p className="kicker">Verify before opening</p>
           <h2 id="verify-download">One file. One measured identity.</h2>
-          <p>After downloading, run <code>shasum -a 256 ControlForge-0.4.0.pkg</code>. The result must match this value exactly.</p>
+          <p>After downloading, run <code>shasum -a 256 ControlForge-0.5.0.pkg</code>. The result must match this value exactly.</p>
         </div>
         <code className="checksum-value">{checksum}</code>
       </section>

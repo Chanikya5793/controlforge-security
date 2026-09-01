@@ -1,9 +1,11 @@
 # macOS production deployment
 
-The current 0.3 collector and local user application package supports Apple Silicon
+The current `0.5.0` collector and local user application source targets Apple Silicon
 (`arm64`) Macs running macOS 13 or later. A universal Intel/Apple Silicon package is not
 yet built or validated. The package builder sets an explicit macOS 13 deployment target
-for both Swift executables and validates the PyInstaller runtime separately.
+for both Swift executables and validates the PyInstaller runtime separately. The signed,
+notarized `0.5.0` staging pilot is publicly downloadable, but is not installed on this
+development Mac and has not completed the clean-Mac lifecycle gate.
 
 ControlForge uses the open-source North Pole Security Santa system extension as
 its macOS endpoint telemetry source. Santa is installed from its official,
@@ -22,6 +24,36 @@ signed package; ControlForge does not rebuild or re-sign Santa.
   and Santa's raw machine identifier are excluded from cloud events.
 - The collector launch daemon ships disabled. It is enabled only after Santa,
   System-keychain credentials, and a test delivery are verified.
+
+### Control-plane outage behavior
+
+The launch daemon still wakes every 60 seconds so local controls, Santa cursors and
+containment reconciliation remain timely. Upload and action polling have separate durable
+retry circuits in the existing SQLite spool. A failed operation starts at a 60-second delay,
+doubles up to one hour and applies bounded deterministic per-device jitter. A delivery outage
+does not prevent action polling, and an action-polling outage does not discard or stop local
+collection. Provider response bodies and socket details do not enter the spool or redacted
+status file.
+
+Each wake drains a bounded number of batches. The library default remains 10 and the value is
+hard-capped at 100; the packaged hosted profile currently selects 25 to recover a retained
+backlog without an uncapped burst. At a 60-second schedule that permits at most 25 ingest
+requests per minute. Return the profile to 10 after recovery when lower steady-state request
+volume is preferred. Increasing this bound changes drain speed, not the number of retained
+events that ultimately require ingestion.
+
+All accepted Santa events remain durably queued until the server acknowledges them. To avoid
+manufacturing an unbounded stream of identical health events during an outage, an unchanged
+endpoint-control snapshot has at most one pending copy. A real control-state transition is
+queued immediately, even while another snapshot is pending. After acknowledgement, an
+unchanged snapshot becomes due again after one hour. The retry and snapshot tables are created
+in place when an existing spool is opened; queued telemetry is not migrated or deleted.
+
+The local status distinguishes an attempted upload failure from a retained backlog whose retry
+circuit is waiting. It records `delivery` or `action_polling` as the failed stage while keeping
+the bounded pending count and lower-bound flag. Control-plane availability failures are isolated
+from the collection cycle, so operators should use the redacted status rather than a launchd
+process exit alone to decide whether the endpoint checked in.
 
 ## Single-Mac installation order
 
@@ -110,13 +142,13 @@ Verify the pair before physical acceptance:
 
 ```bash
 python -m controlforge.release_manifest verify \
-  --manifest /path/to/ControlForge-0.4.0.release.json \
-  --package /path/to/ControlForge-0.4.0.pkg
+  --manifest /path/to/ControlForge-0.5.0.release.json \
+  --package /path/to/ControlForge-0.5.0.pkg
 
 python tools/verify_macos_physical_acceptance.py \
   --phase preinstall \
-  --package /path/to/ControlForge-0.4.0.pkg \
-  --release-manifest /path/to/ControlForge-0.4.0.release.json
+  --package /path/to/ControlForge-0.5.0.pkg \
+  --release-manifest /path/to/ControlForge-0.5.0.release.json
 ```
 
 Use `CONTROLFORGE_RELEASE_CHANNEL=staging` for account-enabled acceptance.
@@ -259,6 +291,27 @@ network extension is not used because it requires a paid Workshop subscription.
 
 Do not switch to Lockdown mode until the monitor-mode execution inventory has
 been reviewed, explicit allow rules are deployed, and recovery has been tested.
+
+## Downloadable 0.5.0 public pilot
+
+The source release line now reports `0.5.0` across the Python package, cloud runtime
+metadata, and macOS app template. It includes the collector outage behavior documented
+above and the deployed cloud admission, capacity, direct-D1 recovery, selective-retention,
+and atomic-audit controls recorded in `DEPLOYMENT_EVIDENCE.md`.
+
+The public artifact was built from clean commit
+`a5f3b6bd08ecf611d13507fe64a62094f6f0ccab` with the fixed staging account host. It is
+14,776,985 bytes with SHA-256
+`d6eaf51fdeaa5e9d9997f3019645d0b33ee757095127a18d942da8e0b0685277`. Apple accepted
+notarization submission `74bd0fc6-e79f-4619-a096-79d6eda4c202`; signature, staple,
+manifest, Gatekeeper and fresh-download checks passed. The package is available at
+`https://controlforge.chanakyachowdary.in/download`.
+
+This establishes a signed public staging pilot, not general availability. The preinstall
+verifier passed the package checks and correctly failed the clean-host checks because this
+development Mac already has an older receipt and payload. Clean-Mac install, reboot,
+upgrade, rollback and uninstall evidence remains required. Do not reuse any `0.4.0`
+digest, notarization submission or physical-acceptance result for `0.5.0`.
 
 ## Signed 0.4.0 staging candidate
 

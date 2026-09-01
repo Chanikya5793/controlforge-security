@@ -18,7 +18,13 @@ function canonicalize(value: unknown): string {
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(record[key])}`).join(",")}}`;
 }
 
-export async function appendAudit(
+export class EventIdentityConflictError extends Error {
+  constructor() {
+    super("event identity conflicts with a previously accepted payload");
+  }
+}
+
+export async function prepareAuditStatement(
   env: Env,
   tenantId: string,
   action: string,
@@ -26,7 +32,8 @@ export async function appendAudit(
   resourceType: string,
   resourceId: string,
   payload: Record<string, unknown>,
-): Promise<void> {
+  requirePreviousChange = false,
+): Promise<D1PreparedStatement> {
   const auditId = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   const payloadJson = canonicalize(payload);
@@ -34,15 +41,42 @@ export async function appendAudit(
     env.AUDIT_HMAC_SECRET,
     [auditId, tenantId, action, principal.type, principal.id, resourceType, resourceId, payloadJson, createdAt].join("\n"),
   );
-  await env.DB.prepare(
+  return env.DB.prepare(
     `INSERT INTO audit_log(
        audit_id, tenant_id, action, actor_type, actor_id, resource_type,
        resource_id, payload_json, integrity_hmac, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       ${requirePreviousChange ? "WHERE changes() = 1" : ""}`,
   ).bind(
     auditId, tenantId, action, principal.type, principal.id, resourceType,
     resourceId, payloadJson, integrityHmac, createdAt,
-  ).run();
+  );
+}
+
+interface NormalizedEvent {
+  canonicalPayload: string;
+  event: SecurityEventInput;
+  occurrences: number;
+  payloadSha256: string;
+}
+
+async function existingEventHashes(
+  env: Env,
+  tenantId: string,
+  eventIds: string[],
+): Promise<Map<string, string>> {
+  const hashes = new Map<string, string>();
+  for (let offset = 0; offset < eventIds.length; offset += 90) {
+    const chunk = eventIds.slice(offset, offset + 90);
+    if (chunk.length === 0) continue;
+    const placeholders = chunk.map(() => "?").join(", ");
+    const existing = await env.DB.prepare(
+      `SELECT event_id, payload_sha256 FROM events
+        WHERE tenant_id = ? AND event_id IN (${placeholders})`,
+    ).bind(tenantId, ...chunk).all<{ event_id: string; payload_sha256: string }>();
+    existing.results.forEach((row) => hashes.set(row.event_id, row.payload_sha256));
+  }
+  return hashes;
 }
 
 export async function persistEvents(
@@ -53,7 +87,7 @@ export async function persistEvents(
   const accepted: string[] = [];
   const duplicates: string[] = [];
   const receivedAt = new Date().toISOString();
-  const normalizedEvents = await Promise.all(events.map(async (event) => {
+  const normalizedInput = await Promise.all(events.map(async (event) => {
     const canonicalPayload = canonicalize(event);
     if (new TextEncoder().encode(canonicalPayload).byteLength > 64_000) {
       throw new Error(`event ${event.event_id} exceeds the 64 KB normalized limit`);
@@ -61,45 +95,103 @@ export async function persistEvents(
     return {
       event,
       canonicalPayload,
+      occurrences: 1,
       payloadSha256: await sha256Hex(canonicalPayload),
     };
   }));
 
-  for (let offset = 0; offset < normalizedEvents.length; offset += 100) {
-    const chunk = normalizedEvents.slice(offset, offset + 100);
-    const results = await env.DB.batch(chunk.map(({ event, payloadSha256 }) => (
-      env.DB.prepare(
-      `INSERT OR IGNORE INTO events(
-         tenant_id, event_id, event_type, occurred_at, received_at, actor,
-         source_ip, target, device_id, attributes_json, payload_sha256
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        tenantId,
-        event.event_id,
-        event.event_type,
-        event.timestamp,
-        receivedAt,
-        event.actor,
-        event.source_ip ?? null,
-        event.target ?? null,
-        event.device_id ?? null,
-        canonicalize(event.attributes),
-        payloadSha256,
-      )
-    )));
+  const uniqueById = new Map<string, NormalizedEvent>();
+  for (const normalized of normalizedInput) {
+    const prior = uniqueById.get(normalized.event.event_id);
+    if (!prior) {
+      uniqueById.set(normalized.event.event_id, normalized);
+      continue;
+    }
+    if (prior.payloadSha256 !== normalized.payloadSha256) {
+      throw new EventIdentityConflictError();
+    }
+    prior.occurrences += 1;
+  }
+  const normalizedEvents = [...uniqueById.values()];
+  const existingHashes = await existingEventHashes(
+    env,
+    tenantId,
+    normalizedEvents.map(({ event }) => event.event_id),
+  );
+  const candidates: NormalizedEvent[] = [];
+  for (const normalized of normalizedEvents) {
+    const existingHash = existingHashes.get(normalized.event.event_id);
+    if (existingHash === undefined) {
+      candidates.push(normalized);
+      continue;
+    }
+    if (existingHash !== normalized.payloadSha256) throw new EventIdentityConflictError();
+    duplicates.push(...Array<string>(normalized.occurrences).fill(normalized.event.event_id));
+  }
+
+  const raced: NormalizedEvent[] = [];
+  for (let offset = 0; offset < candidates.length; offset += 100) {
+    const chunk = candidates.slice(offset, offset + 100);
+    let results: D1Result[];
+    try {
+      results = await env.DB.batch(chunk.map(({ event, payloadSha256 }) => (
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO events(
+             tenant_id, event_id, event_type, occurred_at, received_at, actor,
+             source_ip, target, device_id, attributes_json, payload_sha256
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          tenantId,
+          event.event_id,
+          event.event_type,
+          event.timestamp,
+          receivedAt,
+          event.actor,
+          event.source_ip ?? null,
+          event.target ?? null,
+          event.device_id ?? null,
+          canonicalize(event.attributes),
+          payloadSha256,
+        )
+      )));
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("conflicting event payload")) {
+        throw new EventIdentityConflictError();
+      }
+      throw error;
+    }
     results.forEach((result, index) => {
       const normalized = chunk[index];
       if (!normalized) throw new Error("D1 batch result count does not match event count");
       const eventId = normalized.event.event_id;
-      if (result.meta.changes === 1) accepted.push(eventId);
-      else duplicates.push(eventId);
+      if (result.meta.changes === 1) {
+        accepted.push(eventId);
+        duplicates.push(...Array<string>(normalized.occurrences - 1).fill(eventId));
+      } else {
+        raced.push(normalized);
+      }
     });
   }
 
+  if (raced.length > 0) {
+    const racedHashes = await existingEventHashes(
+      env,
+      tenantId,
+      raced.map(({ event }) => event.event_id),
+    );
+    for (const normalized of raced) {
+      if (racedHashes.get(normalized.event.event_id) !== normalized.payloadSha256) {
+        throw new EventIdentityConflictError();
+      }
+      duplicates.push(...Array<string>(normalized.occurrences).fill(normalized.event.event_id));
+    }
+  }
+
   const pendingDuplicates: string[] = [];
+  const uniqueDuplicates = [...new Set(duplicates)];
   // D1 limits bound SQL parameters; leave room for tenant_id alongside event IDs.
-  for (let offset = 0; offset < duplicates.length; offset += 90) {
-    const chunk = duplicates.slice(offset, offset + 90);
+  for (let offset = 0; offset < uniqueDuplicates.length; offset += 90) {
+    const chunk = uniqueDuplicates.slice(offset, offset + 90);
     const placeholders = chunk.map(() => "?").join(", ");
     const pending = await env.DB.prepare(
       `SELECT event_id FROM events
@@ -160,7 +252,7 @@ export async function persistAlertAndCase(
   const semanticKey = await sha256Hex(
     `${tenantId}:case-semantic:v1:${alert.ruleId}:${entity}`,
   );
-  const inserted = await env.DB.prepare(
+  const alertInsert = env.DB.prepare(
     `INSERT OR IGNORE INTO alerts(
        tenant_id, alert_id, event_id, rule_id, title, severity, actor,
        reasons_json, tags_json, rule_version, rule_digest, rule_snapshot_json,
@@ -178,7 +270,25 @@ export async function persistAlertAndCase(
     alert.detectorVersion,
     JSON.stringify(alert.evidence),
     alert.createdAt,
-  ).run();
+  );
+  const alertAudit = await prepareAuditStatement(
+    env,
+    tenantId,
+    "alert.created",
+    { id: "detector", type: "collector", tenantId },
+    "alert",
+    alert.alertId,
+    {
+      rule_id: alert.ruleId,
+      rule_version: alert.ruleVersion,
+      rule_digest: alert.ruleDigest,
+      fingerprint_version: alert.fingerprintVersion,
+      severity: alert.severity,
+    },
+    true,
+  );
+  const [inserted] = await env.DB.batch([alertInsert, alertAudit]);
+  if (!inserted) throw new Error("alert persistence returned no result");
   const occurrence = await env.DB.prepare(
     `SELECT alert_id FROM alerts
       WHERE tenant_id = ? AND rule_id = ? AND event_id = ?`,
@@ -238,23 +348,6 @@ export async function persistAlertAndCase(
       caseId,
     ),
   ]);
-  if (inserted.meta.changes !== 1 || resolvedAlertId !== alert.alertId) return;
-  await appendAudit(
-    env,
-    tenantId,
-    "alert.created",
-    { id: "detector", type: "collector", tenantId },
-    "alert",
-    alert.alertId,
-    {
-      rule_id: alert.ruleId,
-      rule_version: alert.ruleVersion,
-      rule_digest: alert.ruleDigest,
-      fingerprint_version: alert.fingerprintVersion,
-      severity: alert.severity,
-      case_id: caseId,
-    },
-  );
 }
 
 export async function markEventProcessed(

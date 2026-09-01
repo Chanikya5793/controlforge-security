@@ -5,48 +5,179 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
+concurrency:
+  group: controlforge-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
 jobs:
-  verify:
+  python:
+    name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.9", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: Install
-        run: python -m pip install --upgrade pip && python -m pip install -e '.[dev]'
+      - name: Install development dependencies
+        run: python -m pip install -e '.[dev]'
       - name: Lint
+        if: matrix.python-version == '3.12'
         run: ruff check . && ruff format --check .
       - name: Type check
         run: mypy --python-version "${{ matrix.python-version }}"
       - name: Test
         run: pytest
       - name: Security scan
+        if: matrix.python-version == '3.12'
         run: bandit -c pyproject.toml -r src
-      - name: Build distributions
+      - name: Build Python distributions
+        if: matrix.python-version == '3.12'
         run: python -m build
-      - name: Verify isolated wheel CLI
+      - name: Upload Python distributions
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: controlforge-python-distributions
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
+  python-supply-chain:
+    name: Wheel isolation and dependency audit
+    needs: python
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: controlforge-python-distributions
+          path: dist
+      - name: Verify wheel in an isolated environment
         run: |
-          python -m venv "$RUNNER_TEMP/controlforge-wheel-smoke"
-          "$RUNNER_TEMP/controlforge-wheel-smoke/bin/python" -m pip install dist/*.whl
-          "$RUNNER_TEMP/controlforge-wheel-smoke/bin/controlforge" --help
-          "$RUNNER_TEMP/controlforge-wheel-smoke/bin/controlforge" standalone --help
+          python -m venv "$RUNNER_TEMP/controlforge-wheel"
+          "$RUNNER_TEMP/controlforge-wheel/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/controlforge-wheel/bin/controlforge" --help
+          "$RUNNER_TEMP/controlforge-wheel/bin/controlforge" standalone --help
+          "$RUNNER_TEMP/controlforge-wheel/bin/python" -m pip check
+          "$RUNNER_TEMP/controlforge-wheel/bin/python" -m pip freeze \
+            --exclude controlforge-security > "$RUNNER_TEMP/runtime-requirements.txt"
+      - name: Audit resolved runtime dependencies
+        run: |
+          python -m pip install 'pip-audit==2.10.1'
+          python -m pip_audit --strict --progress-spinner=off \
+            -r "$RUNNER_TEMP/runtime-requirements.txt"
+
+  cloud:
+    name: Cloud control plane
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cloud
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: cloud/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Lint, type check, and test
+        run: npm run check
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+  website:
+    name: Marketing website
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: website
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+  macos-package-contract:
+    name: macOS source and package contract
+    runs-on: macos-15
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Verify static package contract
+        run: make macos-contract
+      - name: Validate property lists and profiles
+        run: |
+          plutil -lint deployment/macos/ControlForge-Info.plist
+          plutil -lint deployment/macos/com.controlforge.agent.plist
+          plutil -lint deployment/macos/com.controlforge.santa.mobileconfig
+          plutil -lint deployment/macos/com.controlforge.santa-system-extension.mobileconfig
+      - name: Type check collector wrapper
+        run: |
+          xcrun swiftc -typecheck -target arm64-apple-macos13.0 \
+            -framework Security deployment/macos/collector-wrapper.swift
+      - name: Type check native application
+        run: |
+          xcrun swiftc -typecheck -parse-as-library -target arm64-apple-macos13.0 \
+            -framework SwiftUI -framework AppKit \
+            deployment/macos/user-dashboard.swift deployment/macos/account-onboarding.swift
 
   container:
+    name: Container build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Build container
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: false
