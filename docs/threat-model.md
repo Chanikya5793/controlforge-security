@@ -41,8 +41,12 @@
 | Access service-token theft | Collector traffic requires both the Access service token and a separate request-bound HMAC credential; both are stored outside the repository and rotate independently |
 | Collector request replay | HMAC covers method, path, body, timestamp, and nonce; nonces are persisted and expire |
 | Cross-tenant data access | Every cloud query is tenant-scoped and Access principals require tenant membership |
+| Tenant or device ingest exhaustion | D1-enforced per-minute tenant and device counters reject the whole batch when either configured budget is exceeded |
 | Queue redelivery | Stable tenant-scoped identifiers and unique constraints make event and alert writes idempotent |
-| Audit record tampering | Records carry an HMAC and database triggers reject updates and deletes |
+| Control-plane outage amplification | Endpoint delivery and action polling have independent durable bounded-backoff circuits; raw telemetry remains spooled while unchanged control snapshots coalesce without suppressing state transitions |
+| D1 capacity exhaustion | Ingest fails closed at the configured high-water threshold before accepting additional event writes |
+| Unsafe retention | Scheduled deletion is bounded and selects only terminal, error-free events older than policy that no alert references |
+| Audit record tampering or omission | Records carry an HMAC, database triggers reject updates and deletes, and protected case/alert mutations commit atomically with their audit record |
 | Autonomous unsafe action | Active and high-impact actions require a different approving principal; unsupported endpoint adapters fail closed |
 | Unsupported response execution | The endpoint collector returns a bounded failure result without changing the host when the separately enabled adapter does not support the exact action or cannot validate its owned state |
 | Recurring-alert case flooding | Active cases have a tenant-scoped semantic key derived from rule and device or normalized actor; a partial unique index and transactional link/update aggregate recurrences while closed history remains immutable |

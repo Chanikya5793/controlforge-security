@@ -18,6 +18,12 @@ Developer ID signed, Apple notarized and stapled. It remains a controlled pilot:
 the account service is staging, and clean-Mac install, reboot, upgrade, rollback,
 uninstall, fleet availability, and service-level acceptance are not yet complete.
 
+The repository has advanced to the `0.5.0` staging source line for collector outage
+resilience and Cloudflare operational safety. No `0.5.0` installer is published yet:
+until a clean source commit is built, signed, notarized, stapled, downloaded again, and
+accepted on a separate Mac, the public `0.4.0` package remains the latest downloadable
+artifact and the new source must not be described as an installed release.
+
 ## Why this exists
 
 Security teams need reliable answers to two operational questions:
@@ -55,8 +61,8 @@ flowchart LR
 - **Investigation workflow:** persists normalized events and deduplicated alerts in SQLite, with bounded alert retrieval.
 - **Operational interfaces:** command-line scanning plus a typed FastAPI service with OpenAPI documentation.
 - **Standalone SOC appliance kernel:** one-node SQLite/WAL processing with passkey authentication, role-based case work, semantic recurring-alert aggregation, bounded evidence history, replayable decision evidence, encrypted backups, offline-locked restore, bounded diagnostics, and no required external provider.
-- **Cloud SOC control plane:** a TypeScript Worker uses D1, Queues, a dead-letter queue, tenant scoping, signed collector requests, semantic recurring-alert case aggregation, append-only notes and dispositions, audited case transitions, and a responsive analyst workbench.
-- **Endpoint collector and local Mac app:** durable SQLite spooling, HMAC-authenticated delivery, replay-resistant requests, macOS System-keychain secrets, bounded Santa JSONL cursors, structured actions, and a strict redacted status contract. The native app shows protection, delivery, telemetry quality, and enum-only containment posture without exposing credentials, raw events, investigation data, PF recovery material, or response controls.
+- **Cloud SOC control plane:** a TypeScript Worker uses D1, Queues, a dead-letter queue, tenant scoping, signed collector requests, database-enforced tenant/device admission budgets, capacity high-water protection, bounded direct-D1 backlog reconciliation, selective retention, semantic recurring-alert case aggregation, atomic audit-coupled mutations, and a responsive analyst workbench.
+- **Endpoint collector and local Mac app:** durable SQLite spooling, independent bounded-backoff delivery and action circuits, HMAC-authenticated replay-resistant requests, macOS System-keychain secrets, bounded Santa JSONL cursors, structured actions, and a strict redacted status contract. Raw telemetry remains lossless during outages while unchanged control snapshots coalesce without hiding state transitions. The native app shows protection, delivery, telemetry quality, and enum-only containment posture without exposing credentials, raw events, investigation data, PF recovery material, or response controls.
 - **Response governance:** read-only actions may be policy-approved; active and high-impact changes require a second human principal and a separately installed endpoint adapter.
 - **Safety controls:** read-only endpoint probes, no shell interpolation, bounded input batches, parameterized SQL, non-secret fixtures, static analysis, and dependency-light packaging.
 
@@ -328,7 +334,8 @@ The verification target runs:
 - Full pySigma backend interoperability and rule conversion
 - Signed webhook ingestion and queue-backed processing
 - OpenTelemetry metrics and rule-performance dashboards
-- Broader audit coverage, off-appliance audit anchoring, and scheduled retention operations
+- Off-appliance audit anchoring, immutable archive retention, and audit-key rotation ceremonies
+- Per-tenant D1 sharding, long-duration Queue/D1 soak testing, and cost/usage alerting
 - Trusted-certificate appliance packaging and physical hardware/passkey acceptance
 - Clean, tagged macOS production releases with manifest-pinned MDM distribution
 - Tested operating-system containment adapters and enterprise identity-provider rollout

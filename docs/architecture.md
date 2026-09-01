@@ -118,6 +118,13 @@ The fixture probe allows every branch to be reproduced without requiring an EDR 
    adapter can execute only fixed, signed isolate/release actions with a management allowlist,
    15-minute maximum, owned state, rollback, and reconciliation. It remains disabled by default;
    unsupported, expired, or unconfigured actions fail closed.
+7. Delivery and action polling use independent SQLite-persisted exponential retry circuits with
+   bounded deterministic jitter. Raw endpoint telemetry remains lossless in the durable spool.
+   Unchanged control snapshots coalesce to one pending copy, while every observed state transition
+   is retained; this prevents a one-minute launch schedule from amplifying a control-plane outage.
+8. The cloud scheduler reconciles bounded D1 batches every minute so Queue retry exhaustion does
+   not strand accepted telemetry. Retention has its own persisted cadence and deletes only terminal,
+   error-free events that are older than policy and are not referenced by an alert.
 
 ## Deliberate trade-offs
 

@@ -17,19 +17,28 @@ import {
 import { dashboardHtml } from "./dashboard";
 import { detectEvent, replayStoredSnapshot } from "./detector";
 import {
+  enforceIngestionLimits,
+  loadOperationalHealth,
+  requireIngestionCapacity,
+  runTelemetryRetention,
+  StorageCapacityError,
+  TenantIngestionLimitError,
+} from "./operational-safety";
+import {
   loadCaseDetail,
   loadCaseQueue,
   loadDashboardSummary,
   loadResponseActions,
 } from "./operations";
 import {
-  appendAudit,
+  EventIdentityConflictError,
   loadEvent,
   mapAlert,
   markEventProcessed,
   markEventsProcessed,
   persistAlertAndCase,
   persistEvents,
+  prepareAuditStatement,
 } from "./repository";
 import {
   actionDecisionSchema,
@@ -82,7 +91,7 @@ function requireHumanMutationBoundary(
   }
 }
 
-function jsonError(message: string, status: 400 | 401 | 403 | 404 | 409 | 413 | 500 | 503): Response {
+function jsonError(message: string, status: 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 503): Response {
   return Response.json({ error: message }, { status });
 }
 
@@ -134,6 +143,17 @@ app.onError((error) => {
   if (error instanceof AuthorizationError) return jsonError(error.message, 403);
   if (error instanceof BadRequestError) return jsonError(error.message, 400);
   if (error instanceof ReplayError) return jsonError(error.message, 409);
+  if (error instanceof EventIdentityConflictError) return jsonError(error.message, 409);
+  if (error instanceof TenantIngestionLimitError) {
+    const response = jsonError(error.message, 429);
+    response.headers.set("retry-after", String(error.retryAfterSeconds));
+    return response;
+  }
+  if (error instanceof StorageCapacityError) {
+    const response = jsonError(error.message, 503);
+    response.headers.set("retry-after", String(error.retryAfterSeconds));
+    return response;
+  }
   if (error instanceof CaseWorkflowError) {
     if (error.code === "case_not_found") return jsonError("case not found", 404);
     if (error.code === "disposition_required") {
@@ -160,7 +180,7 @@ app.onError((error) => {
 app.get("/health", (context) => context.json({
   status: "ok",
   service: "controlforge-soc",
-  version: "0.3.0",
+  version: "0.5.0",
   environment: context.env.ENVIRONMENT,
 }));
 
@@ -223,6 +243,16 @@ app.post("/v1/admin/tenants", async (context) => {
   const encrypted = await encryptCollectorSecret(collectorSecret, context.env.CREDENTIAL_KEK);
   const createdAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + input.credential_ttl_days * 86_400_000).toISOString();
+  const audit = await prepareAuditStatement(
+    context.env,
+    tenantId,
+    "tenant.created",
+    principal,
+    "tenant",
+    tenantId,
+    { slug: input.slug, credential_id: credentialId, device_id: input.device_id },
+    true,
+  );
   await context.env.DB.batch([
     context.env.DB.prepare(
       "INSERT INTO tenants(tenant_id, slug, display_name, status, created_at) VALUES (?, ?, ?, 'active', ?)",
@@ -244,12 +274,8 @@ app.post("/v1/admin/tenants", async (context) => {
       credentialId, tenantId, input.device_id, input.credential_name,
       encrypted.ciphertext, encrypted.iv, createdAt, expiresAt,
     ),
+    audit,
   ]);
-  await appendAudit(context.env, tenantId, "tenant.created", principal, "tenant", tenantId, {
-    slug: input.slug,
-    credential_id: credentialId,
-    device_id: input.device_id,
-  });
   return context.json({
     tenant_id: tenantId,
     device: {
@@ -279,20 +305,28 @@ app.post("/v1/ingest/events", async (context) => {
   if (input.events.some((event) => event.device_id !== principal.deviceId)) {
     throw new AuthorizationError("collector may ingest events only for its bound device");
   }
+  await requireIngestionCapacity(context.env);
+  await enforceIngestionLimits(
+    context.env,
+    principal.tenantId,
+    principal.deviceId,
+    input.events.length,
+  );
   const result = await persistEvents(context.env, principal.tenantId, input.events);
-  await context.env.DB.prepare(
+  const observedAt = new Date().toISOString();
+  const deviceUpdate = context.env.DB.prepare(
     `UPDATE devices
         SET status = 'active',
             first_seen_at = coalesce(first_seen_at, ?),
             last_seen_at = ?
       WHERE tenant_id = ? AND device_id = ? AND revoked_at IS NULL`,
   ).bind(
-    new Date().toISOString(),
-    new Date().toISOString(),
+    observedAt,
+    observedAt,
     principal.tenantId,
     principal.deviceId,
-  ).run();
-  await appendAudit(
+  );
+  const audit = await prepareAuditStatement(
     context.env,
     principal.tenantId,
     "events.ingested",
@@ -300,7 +334,12 @@ app.post("/v1/ingest/events", async (context) => {
     "event_batch",
     crypto.randomUUID(),
     { accepted: result.accepted.length, duplicates: result.duplicates.length },
+    true,
   );
+  const [updatedDevice] = await context.env.DB.batch([deviceUpdate, audit]);
+  if (updatedDevice?.meta.changes !== 1) {
+    throw new AuthorizationError("collector device is no longer active");
+  }
   return context.json({
     accepted: result.accepted.length,
     duplicates: result.duplicates.length,
@@ -472,6 +511,15 @@ app.get("/v1/dashboard/summary", async (context) => {
   );
 });
 
+app.get("/v1/operations/storage-health", async (context) => {
+  const { tenantId } = await requireTenant(
+    context.req.raw,
+    context.env,
+    "view_security_data",
+  );
+  return context.json(await loadOperationalHealth(context.env, tenantId));
+});
+
 app.get("/v1/devices", async (context) => {
   const { tenantId } = await requireTenant(
     context.req.raw,
@@ -613,7 +661,7 @@ app.post("/v1/alerts/:alertId/replay", async (context) => {
     : null;
   const evaluationId = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  await context.env.DB.prepare(
+  const evaluationInsert = context.env.DB.prepare(
     `INSERT INTO alert_replay_evaluations(
        tenant_id, evaluation_id, alert_id, mode, outcome, evaluated_rule_version,
        evaluated_rule_digest, snapshot_kind, evidence_basis, result_json, created_by, created_at
@@ -636,8 +684,8 @@ app.post("/v1/alerts/:alertId/replay", async (context) => {
     }),
     principal.id,
     createdAt,
-  ).run();
-  await appendAudit(
+  );
+  const audit = await prepareAuditStatement(
     context.env,
     tenantId,
     "alert.replayed",
@@ -654,7 +702,9 @@ app.post("/v1/alerts/:alertId/replay", async (context) => {
       snapshot_kind: snapshotKind,
       evidence_basis: evidenceBasis,
     },
+    true,
   );
+  await context.env.DB.batch([evaluationInsert, audit]);
   return context.json({
     evaluation_id: evaluationId,
     mode,
@@ -697,7 +747,7 @@ app.post("/v1/cases/:caseId/actions", async (context) => {
     throw new AuthorizationError("principal role cannot propose active response");
   }
   const status = risk === "read_only" ? "approved" : "proposed";
-  await context.env.DB.prepare(
+  const actionInsert = context.env.DB.prepare(
     `INSERT INTO response_actions(
        tenant_id, action_id, case_id, action_type, target_type, target_id, rationale,
        risk_level, status, proposed_by, proposed_at, approved_by, approved_at, expires_at
@@ -708,13 +758,23 @@ app.post("/v1/cases/:caseId/actions", async (context) => {
     risk === "read_only" ? "policy:auto-read-only" : null,
     risk === "read_only" ? proposedAt : null,
     expiresAt,
-  ).run();
-  await appendAudit(context.env, tenantId, "response.proposed", principal, "response_action", actionId, {
-    action_type: input.action_type,
-    risk_level: risk,
-    status,
-    case_id: existingCase.case_id,
-  });
+  );
+  const audit = await prepareAuditStatement(
+    context.env,
+    tenantId,
+    "response.proposed",
+    principal,
+    "response_action",
+    actionId,
+    {
+      action_type: input.action_type,
+      risk_level: risk,
+      status,
+      case_id: existingCase.case_id,
+    },
+    true,
+  );
+  await context.env.DB.batch([actionInsert, audit]);
   return context.json({ action_id: actionId, status, risk_level: risk, expires_at: expiresAt }, 201);
 });
 
@@ -745,7 +805,7 @@ app.post("/v1/actions/:actionId/decision", async (context) => {
   }
   const status = input.decision === "approve" ? "approved" : "rejected";
   const decidedAt = new Date().toISOString();
-  const decision = await context.env.DB.prepare(
+  const decisionUpdate = context.env.DB.prepare(
     `UPDATE response_actions SET status = ?, approved_by = ?, approved_at = ?
       WHERE tenant_id = ? AND action_id = ? AND status = 'proposed' AND expires_at > ?`,
   ).bind(
@@ -755,13 +815,21 @@ app.post("/v1/actions/:actionId/decision", async (context) => {
     tenantId,
     context.req.param("actionId"),
     decidedAt,
-  ).run();
-  if (decision.meta.changes !== 1) {
+  );
+  const audit = await prepareAuditStatement(
+    context.env,
+    tenantId,
+    `response.${status}`,
+    principal,
+    "response_action",
+    context.req.param("actionId"),
+    { decision_rationale: input.rationale },
+    true,
+  );
+  const [decision] = await context.env.DB.batch([decisionUpdate, audit]);
+  if (decision?.meta.changes !== 1) {
     return jsonError("response action is no longer awaiting a decision", 409);
   }
-  await appendAudit(context.env, tenantId, `response.${status}`, principal, "response_action", context.req.param("actionId"), {
-    decision_rationale: input.rationale,
-  });
   return context.json({ action_id: context.req.param("actionId"), status });
 });
 
@@ -799,7 +867,7 @@ app.post("/v1/agent/actions/:actionId/result", async (context) => {
   }
   const input = actionResultSchema.parse(JSON.parse(body));
   const actionId = context.req.param("actionId");
-  const result = await context.env.DB.prepare(
+  const resultUpdate = context.env.DB.prepare(
     `UPDATE response_actions SET status = ?, result_json = ?, completed_at = ?
       WHERE tenant_id = ? AND action_id = ? AND target_type = 'device'
         AND target_id = ? AND status = 'dispatched'`,
@@ -810,12 +878,19 @@ app.post("/v1/agent/actions/:actionId/result", async (context) => {
     principal.tenantId,
     actionId,
     principal.deviceId,
-  ).run();
-  if (result.meta.changes !== 1) return jsonError("dispatched response action not found", 404);
-  await appendAudit(context.env, principal.tenantId, `response.${input.status}`, principal, "response_action", actionId, {
-    summary: input.summary,
-    evidence_count: input.evidence.length,
-  });
+  );
+  const audit = await prepareAuditStatement(
+    context.env,
+    principal.tenantId,
+    `response.${input.status}`,
+    principal,
+    "response_action",
+    actionId,
+    { summary: input.summary, evidence_count: input.evidence.length },
+    true,
+  );
+  const [result] = await context.env.DB.batch([resultUpdate, audit]);
+  if (result?.meta.changes !== 1) return jsonError("dispatched response action not found", 404);
   return context.json({ action_id: actionId, status: input.status });
 });
 
@@ -911,6 +986,7 @@ const worker: ExportedHandler<Env, QueuedEvent> = {
         "UPDATE response_actions SET status = 'expired' WHERE status IN ('proposed', 'approved', 'dispatched') AND expires_at < ?",
       ).bind(now),
     ]);
+    await runTelemetryRetention(env);
   },
 };
 

@@ -15,9 +15,9 @@ import tempfile
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal, Optional, Protocol
+from typing import Callable, Literal, Optional, Protocol
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -70,6 +70,11 @@ class CollectorDefinition(BaseModel):
     access_proxy_required: bool = True
     action_polling_enabled: bool = True
     credential_rotation_enabled: bool = False
+    control_snapshot_interval_seconds: int = Field(default=3600, ge=60, le=86_400)
+    delivery_flush_batch_limit: int = Field(default=10, ge=1, le=100)
+    retry_backoff_initial_seconds: int = Field(default=60, ge=1, le=3600)
+    retry_backoff_max_seconds: int = Field(default=3600, ge=1, le=86_400)
+    retry_backoff_jitter_ratio: float = Field(default=0.2, ge=0.0, le=0.5)
     response_adapter_enabled: bool = False
     response_state_path: Path = Path(
         "/Library/Application Support/ControlForge/response/pf-state.json"
@@ -78,6 +83,12 @@ class CollectorDefinition(BaseModel):
         default="com.controlforge.collector",
         pattern=r"^[A-Za-z0-9.-]{3,128}$",
     )
+
+    @model_validator(mode="after")
+    def validate_retry_window(self) -> CollectorDefinition:
+        if self.retry_backoff_max_seconds < self.retry_backoff_initial_seconds:
+            raise ValueError("retry backoff maximum must not be below its initial delay")
+        return self
 
 
 def load_collector_definition(path: Path) -> CollectorDefinition:
@@ -510,6 +521,28 @@ class AgentStatusSnapshotStore:
             temporary_path.unlink(missing_ok=True)
 
 
+RetryOperation = Literal["delivery", "action_polling"]
+
+
+@dataclass(frozen=True)
+class OperationRetryState:
+    """Durable, non-secret circuit state for one control-plane operation."""
+
+    consecutive_failures: int
+    retry_after: datetime
+
+
+@dataclass(frozen=True)
+class DeliveryAttempt:
+    """One bounded spool flush without exposing a provider response."""
+
+    delivered: int
+    pending: int
+    pending_is_lower_bound: bool
+    failed: bool
+    deferred: bool
+
+
 class CollectorTransport(Protocol):
     def request(
         self,
@@ -627,13 +660,16 @@ class SignedControlForgeClient:
         if self._access_client_id is not None and self._access_client_secret is not None:
             headers["cf-access-client-id"] = self._access_client_id
             headers["cf-access-client-secret"] = self._access_client_secret
-        status, response_payload = self._transport.request(
-            method,
-            path,
-            headers,
-            body,
-            self._timeout_seconds,
-        )
+        try:
+            status, response_payload = self._transport.request(
+                method,
+                path,
+                headers,
+                body,
+                self._timeout_seconds,
+            )
+        except (OSError, TimeoutError, http.client.HTTPException) as exc:
+            raise CollectorError("control-plane request could not be completed") from exc
         if status < 200 or status >= 300:
             raise CollectorError(f"control-plane request failed with HTTP {status}")
         try:
@@ -748,6 +784,26 @@ class AgentSpool:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS operation_retry_state (
+                    operation TEXT PRIMARY KEY,
+                    consecutive_failures INTEGER NOT NULL,
+                    retry_after TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS control_snapshot_state (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    fingerprint TEXT NOT NULL,
+                    pending_batch_id TEXT,
+                    last_enqueued_at TEXT NOT NULL
+                )
+                """
+            )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path)
@@ -763,6 +819,80 @@ class AgentSpool:
                 (batch_id, payload, datetime.now(timezone.utc).isoformat()),
             )
         return batch_id
+
+    def enqueue_collected(
+        self,
+        control_events: list[SecurityEvent],
+        telemetry_events: list[SecurityEvent],
+        *,
+        control_fingerprint: str,
+        control_snapshot_interval_seconds: int,
+        now: datetime,
+    ) -> tuple[Optional[str], bool]:
+        """Durably enqueue telemetry and only a due or changed control snapshot.
+
+        Raw telemetry is never coalesced. An unchanged control snapshot is omitted while
+        its latest batch remains pending, then emitted periodically only after the latest
+        snapshot was acknowledged.
+        """
+
+        if now.tzinfo is None:
+            raise ValueError("collector spool time must be timezone-aware")
+        if control_snapshot_interval_seconds < 60 or control_snapshot_interval_seconds > 86_400:
+            raise ValueError("control snapshot interval must be between 60 and 86400 seconds")
+        now = now.astimezone(timezone.utc)
+        batch_id = str(uuid.uuid4())
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT fingerprint, pending_batch_id, last_enqueued_at
+                FROM control_snapshot_state WHERE singleton = 1
+                """
+            ).fetchone()
+            control_due = row is None or str(row["fingerprint"]) != control_fingerprint
+            if row is not None and not control_due:
+                pending_batch_id = row["pending_batch_id"]
+                pending_exists = False
+                if pending_batch_id is not None:
+                    pending_exists = (
+                        connection.execute(
+                            "SELECT 1 FROM outbound_batches WHERE batch_id = ?",
+                            (str(pending_batch_id),),
+                        ).fetchone()
+                        is not None
+                    )
+                last_enqueued_at = datetime.fromisoformat(str(row["last_enqueued_at"]))
+                if last_enqueued_at.tzinfo is None:
+                    raise ValueError("stored control snapshot time must be timezone-aware")
+                control_due = not pending_exists and now >= last_enqueued_at + timedelta(
+                    seconds=control_snapshot_interval_seconds
+                )
+
+            selected_events = (
+                [*control_events, *telemetry_events] if control_due else telemetry_events
+            )
+            if not selected_events:
+                return None, False
+            payload = json.dumps([event.model_dump(mode="json") for event in selected_events])
+            connection.execute(
+                "INSERT INTO outbound_batches(batch_id, payload_json, created_at) VALUES (?, ?, ?)",
+                (batch_id, payload, now.isoformat()),
+            )
+            if control_due:
+                connection.execute(
+                    """
+                    INSERT INTO control_snapshot_state(
+                        singleton, fingerprint, pending_batch_id, last_enqueued_at
+                    ) VALUES (1, ?, ?, ?)
+                    ON CONFLICT(singleton) DO UPDATE SET
+                        fingerprint = excluded.fingerprint,
+                        pending_batch_id = excluded.pending_batch_id,
+                        last_enqueued_at = excluded.last_enqueued_at
+                    """,
+                    (control_fingerprint, batch_id, now.isoformat()),
+                )
+        return batch_id, control_due
 
     def pending(self, limit: int = 10) -> list[tuple[str, list[SecurityEvent]]]:
         if limit < 1 or limit > 100:
@@ -796,6 +926,14 @@ class AgentSpool:
 
     def acknowledge(self, batch_id: str) -> None:
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                UPDATE control_snapshot_state SET pending_batch_id = NULL
+                WHERE singleton = 1 AND pending_batch_id = ?
+                """,
+                (batch_id,),
+            )
             connection.execute("DELETE FROM outbound_batches WHERE batch_id = ?", (batch_id,))
 
     def fail(self, batch_id: str, error: str) -> None:
@@ -807,6 +945,93 @@ class AgentSpool:
                  WHERE batch_id = ?
                 """,
                 (error[:500], batch_id),
+            )
+
+    @staticmethod
+    def _validate_retry_operation(operation: RetryOperation) -> None:
+        if operation not in {"delivery", "action_polling"}:
+            raise ValueError("invalid collector retry operation")
+
+    def retry_state(self, operation: RetryOperation) -> Optional[OperationRetryState]:
+        self._validate_retry_operation(operation)
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT consecutive_failures, retry_after
+                FROM operation_retry_state WHERE operation = ?
+                """,
+                (operation,),
+            ).fetchone()
+        if row is None:
+            return None
+        retry_after = datetime.fromisoformat(str(row["retry_after"]))
+        if retry_after.tzinfo is None:
+            raise ValueError("stored retry time must be timezone-aware")
+        return OperationRetryState(
+            consecutive_failures=int(row["consecutive_failures"]),
+            retry_after=retry_after.astimezone(timezone.utc),
+        )
+
+    def retry_ready(self, operation: RetryOperation, now: datetime) -> bool:
+        if now.tzinfo is None:
+            raise ValueError("collector retry time must be timezone-aware")
+        state = self.retry_state(operation)
+        return state is None or now.astimezone(timezone.utc) >= state.retry_after
+
+    def record_retry_failure(
+        self,
+        operation: RetryOperation,
+        *,
+        now: datetime,
+        initial_seconds: int,
+        maximum_seconds: int,
+        jitter_ratio: float,
+        jitter_key: str,
+    ) -> OperationRetryState:
+        """Open a bounded exponential retry circuit with deterministic jitter."""
+
+        self._validate_retry_operation(operation)
+        if now.tzinfo is None:
+            raise ValueError("collector retry time must be timezone-aware")
+        if initial_seconds < 1 or maximum_seconds < initial_seconds:
+            raise ValueError("invalid collector retry delay bounds")
+        if jitter_ratio < 0.0 or jitter_ratio > 0.5:
+            raise ValueError("collector retry jitter must be between 0 and 0.5")
+        now = now.astimezone(timezone.utc)
+        current = self.retry_state(operation)
+        failures = min(31, (current.consecutive_failures if current is not None else 0) + 1)
+        base_delay = min(maximum_seconds, initial_seconds * (2 ** min(failures - 1, 30)))
+        digest = hashlib.sha256(f"{jitter_key}:{operation}:{failures}".encode()).digest()
+        unit_interval = int.from_bytes(digest[:8], "big") / float(2**64 - 1)
+        jittered_delay = round(
+            base_delay * (1.0 - jitter_ratio + (2.0 * jitter_ratio * unit_interval))
+        )
+        delay_seconds = min(maximum_seconds, max(1, jittered_delay))
+        retry_after = now + timedelta(seconds=delay_seconds)
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO operation_retry_state(
+                    operation, consecutive_failures, retry_after, updated_at
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(operation) DO UPDATE SET
+                    consecutive_failures = excluded.consecutive_failures,
+                    retry_after = excluded.retry_after,
+                    updated_at = excluded.updated_at
+                """,
+                (operation, failures, retry_after.isoformat(), now.isoformat()),
+            )
+        return OperationRetryState(
+            consecutive_failures=failures,
+            retry_after=retry_after,
+        )
+
+    def clear_retry_state(self, operation: RetryOperation) -> None:
+        self._validate_retry_operation(operation)
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM operation_retry_state WHERE operation = ?",
+                (operation,),
             )
 
     def source_cursor(self, source_id: str) -> Optional[SourceCursor]:
@@ -905,6 +1130,7 @@ class EndpointCollectorAgent:
         status_store: Optional[AgentStatusSnapshotStore] = None,
         response_adapter: Optional[MacOSResponseAdapter] = None,
         credential_pair_store: Optional[CredentialPairStore] = None,
+        clock: Optional[Callable[[], datetime]] = None,
     ) -> None:
         self._definition = definition
         self._client = client
@@ -917,6 +1143,7 @@ class EndpointCollectorAgent:
             self._santa_reader = SantaJsonLogReader(definition.santa, definition.device_id)
         self._response_adapter = response_adapter
         self._credential_pair_store = credential_pair_store
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         try:
             response_state_exists = (
                 definition.response_state_path.exists()
@@ -937,6 +1164,22 @@ class EndpointCollectorAgent:
                 state_path=definition.response_state_path,
             )
 
+    def _now(self) -> datetime:
+        now = self._clock()
+        if now.tzinfo is None:
+            raise ValueError("collector clock must be timezone-aware")
+        return now.astimezone(timezone.utc)
+
+    def _record_retry_failure(self, operation: RetryOperation, now: datetime) -> None:
+        self._spool.record_retry_failure(
+            operation,
+            now=now,
+            initial_seconds=self._definition.retry_backoff_initial_seconds,
+            maximum_seconds=self._definition.retry_backoff_max_seconds,
+            jitter_ratio=self._definition.retry_backoff_jitter_ratio,
+            jitter_key=self._definition.device_id,
+        )
+
     def _handle_credential_rotation(self) -> bool:
         if not self._definition.credential_rotation_enabled or self._credential_pair_store is None:
             return False
@@ -950,7 +1193,7 @@ class EndpointCollectorAgent:
             return False
         material = self._client.decrypt_credential_rotation(
             envelope,
-            datetime.now(timezone.utc),
+            self._now(),
         )
         if pending is not None and pending != (
             material.rotation_id,
@@ -1000,25 +1243,61 @@ class EndpointCollectorAgent:
             for finding in report.findings
         ]
 
-    def _flush(self) -> tuple[int, int, bool, bool]:
+    @staticmethod
+    def _control_snapshot_fingerprint(report: ControlReport) -> str:
+        snapshot = {
+            "hostname": report.hostname,
+            "platform": report.platform,
+            "findings": [
+                {
+                    "agent_id": finding.agent_id,
+                    "status": finding.status.value,
+                    "installed": finding.installed,
+                    "running": finding.running,
+                    "heartbeat_observed": finding.heartbeat_age_seconds is not None,
+                    "stable_evidence": sorted(
+                        item for item in finding.evidence if not item.startswith("heartbeat age:")
+                    ),
+                    "recommended_action": finding.recommended_action,
+                }
+                for finding in sorted(report.findings, key=lambda finding: finding.agent_id)
+            ],
+        }
+        payload = json.dumps(snapshot, separators=(",", ":"), sort_keys=True).encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    def _flush(self, now: datetime) -> DeliveryAttempt:
         delivered = 0
-        delivery_failed = False
-        for batch_id, events in self._spool.pending():
+        pending, pending_is_lower_bound = self._spool.pending_summary()
+        if pending == 0:
+            self._spool.clear_retry_state("delivery")
+            return DeliveryAttempt(0, 0, False, False, False)
+        if not self._spool.retry_ready("delivery", now):
+            return DeliveryAttempt(0, pending, pending_is_lower_bound, False, True)
+        for batch_id, events in self._spool.pending(
+            limit=self._definition.delivery_flush_batch_limit
+        ):
             try:
                 self._client.ingest(events)
             except CollectorError as exc:
                 self._spool.fail(batch_id, str(exc))
-                delivery_failed = True
-                break
+                self._record_retry_failure("delivery", now)
+                pending, pending_is_lower_bound = self._spool.pending_summary()
+                return DeliveryAttempt(
+                    delivered,
+                    pending,
+                    pending_is_lower_bound,
+                    True,
+                    False,
+                )
             self._spool.acknowledge(batch_id)
             delivered += 1
+        self._spool.clear_retry_state("delivery")
         pending, pending_is_lower_bound = self._spool.pending_summary()
-        return delivered, pending, pending_is_lower_bound, delivery_failed
+        return DeliveryAttempt(delivered, pending, pending_is_lower_bound, False, False)
 
     def _handle_action(self, action: AgentAction, report: ControlReport) -> None:
-        if action.target_id != self._definition.device_id or action.expires_at <= datetime.now(
-            timezone.utc
-        ):
+        if action.target_id != self._definition.device_id or action.expires_at <= self._now():
             self._client.submit_action_result(
                 action.action_id,
                 False,
@@ -1118,7 +1397,7 @@ class EndpointCollectorAgent:
             return
         self._status_store.write(
             AgentStatusSnapshot(
-                generated_at=datetime.now(timezone.utc),
+                generated_at=self._now(),
                 device_id=self._definition.device_id,
                 agent_version=__version__,
                 run_status=run_status,
@@ -1179,6 +1458,15 @@ class EndpointCollectorAgent:
         )
         actions_processed = 0
         reconciliation_events_collected = 0
+        run_failure_stage: Optional[
+            Literal[
+                "credential_rotation",
+                "control_collection",
+                "telemetry_collection",
+                "delivery",
+                "action_polling",
+            ]
+        ] = None
         try:
             self._handle_credential_rotation()
             failure_stage = "control_collection"
@@ -1191,8 +1479,9 @@ class EndpointCollectorAgent:
                     self._spool.enqueue([self._reconciliation_event(transition)])
                     reconciliation_events_collected = 1
             report = self._control_report()
-            events.extend(self._control_events(report))
+            control_events = self._control_events(report)
             failure_stage = "telemetry_collection"
+            telemetry_events: list[SecurityEvent] = []
             santa_cursor: Optional[tuple[str, SourceCursor]] = None
             if self._santa_reader is not None:
                 try:
@@ -1202,32 +1491,56 @@ class EndpointCollectorAgent:
                 except SantaLogError:
                     santa_lines_rejected = 1
                 else:
-                    events.extend(santa_batch.events)
+                    telemetry_events.extend(santa_batch.events)
                     santa_events_collected = len(santa_batch.events)
                     santa_lines_rejected = santa_batch.rejected_lines
                     santa_cursor = (self._santa_reader.source_id, santa_batch.cursor)
-            self._spool.enqueue(events)
+            _, control_snapshot_enqueued = self._spool.enqueue_collected(
+                control_events,
+                telemetry_events,
+                control_fingerprint=self._control_snapshot_fingerprint(report),
+                control_snapshot_interval_seconds=(
+                    self._definition.control_snapshot_interval_seconds
+                ),
+                now=self._now(),
+            )
+            if control_snapshot_enqueued:
+                events.extend(control_events)
+            events.extend(telemetry_events)
             if santa_cursor is not None:
                 self._spool.save_source_cursor(*santa_cursor)
             failure_stage = "delivery"
-            (
-                batches_delivered,
-                batches_pending,
-                batches_pending_is_lower_bound,
-                delivery_failed,
-            ) = self._flush()
-            if delivery_failed:
+            delivery = self._flush(self._now())
+            batches_delivered = delivery.delivered
+            batches_pending = delivery.pending
+            batches_pending_is_lower_bound = delivery.pending_is_lower_bound
+            if delivery.failed:
                 delivery_status = "failed"
+                run_failure_stage = "delivery"
             elif batches_pending > 0:
                 delivery_status = "backlogged"
+                if delivery.deferred:
+                    run_failure_stage = "delivery"
+            elif batches_delivered == 0:
+                delivery_status = "not_attempted"
             else:
                 delivery_status = "succeeded"
             if self._definition.action_polling_enabled:
                 failure_stage = "action_polling"
-                actions = self._client.pending_actions()
-                for action in actions:
-                    self._handle_action(action, report)
-                actions_processed = len(actions)
+                now = self._now()
+                if self._spool.retry_ready("action_polling", now):
+                    try:
+                        actions = self._client.pending_actions()
+                        for action in actions:
+                            self._handle_action(action, report)
+                            actions_processed += 1
+                    except (CollectorError, ValueError):
+                        self._record_retry_failure("action_polling", now)
+                        run_failure_stage = "action_polling"
+                    else:
+                        self._spool.clear_retry_state("action_polling")
+                else:
+                    run_failure_stage = "action_polling"
         except Exception:
             try:
                 batches_pending, batches_pending_is_lower_bound = self._spool.pending_summary()
@@ -1249,8 +1562,8 @@ class EndpointCollectorAgent:
             raise
 
         self._write_status(
-            run_status="completed",
-            failure_stage=None,
+            run_status="failed" if run_failure_stage is not None else "completed",
+            failure_stage=run_failure_stage,
             report=report,
             delivery_status=delivery_status,
             batches_delivered=batches_delivered,

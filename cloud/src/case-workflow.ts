@@ -1,4 +1,4 @@
-import { appendAudit } from "./repository";
+import { prepareAuditStatement } from "./repository";
 import type { AuthenticatedPrincipal, Env } from "./types";
 
 export type CaseStatus = "open" | "investigating" | "contained" | "closed";
@@ -48,14 +48,21 @@ export async function appendCaseNote(
   await requireCase(env, tenantId, caseId);
   const noteId = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  await env.DB.prepare(
+  const insert = env.DB.prepare(
     `INSERT INTO case_notes(tenant_id, note_id, case_id, body, created_by, created_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
-  ).bind(tenantId, noteId, caseId, body, principal.id, createdAt).run();
-  await appendAudit(env, tenantId, "case.note_added", principal, "case", caseId, {
-    note_id: noteId,
-    body_length: body.length,
-  });
+  ).bind(tenantId, noteId, caseId, body, principal.id, createdAt);
+  const audit = await prepareAuditStatement(
+    env,
+    tenantId,
+    "case.note_added",
+    principal,
+    "case",
+    caseId,
+    { note_id: noteId, body_length: body.length },
+    true,
+  );
+  await env.DB.batch([insert, audit]);
   return {
     note_id: noteId,
     case_id: caseId,
@@ -78,7 +85,7 @@ export async function appendCaseDisposition(
   const dispositionId = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   const storedDisposition = disposition === "benign" ? "benign_positive" : disposition;
-  await env.DB.prepare(
+  const insert = env.DB.prepare(
     `INSERT INTO case_dispositions(
        tenant_id, disposition_id, case_id, disposition, rationale,
        created_by, created_at, false_positive_reason
@@ -92,13 +99,23 @@ export async function appendCaseDisposition(
     principal.id,
     createdAt,
     falsePositiveReason,
-  ).run();
-  await appendAudit(env, tenantId, "case.disposition_added", principal, "case", caseId, {
-    disposition_id: dispositionId,
-    disposition,
-    rationale_length: rationale.length,
-    false_positive_reason_recorded: falsePositiveReason !== null,
-  });
+  );
+  const audit = await prepareAuditStatement(
+    env,
+    tenantId,
+    "case.disposition_added",
+    principal,
+    "case",
+    caseId,
+    {
+      disposition_id: dispositionId,
+      disposition,
+      rationale_length: rationale.length,
+      false_positive_reason_recorded: falsePositiveReason !== null,
+    },
+    true,
+  );
+  await env.DB.batch([insert, audit]);
   return {
     disposition_id: dispositionId,
     case_id: caseId,
@@ -134,7 +151,7 @@ export async function assignCase(
     throw new CaseWorkflowError("assignment_conflict");
   }
   const updatedAt = new Date().toISOString();
-  const changed = await env.DB.prepare(
+  const update = env.DB.prepare(
     `UPDATE cases SET assignee_principal_id = ?, updated_at = ?
       WHERE tenant_id = ? AND case_id = ?
         AND (assignee_principal_id IS ? OR assignee_principal_id = ?)`,
@@ -145,12 +162,22 @@ export async function assignCase(
     caseId,
     selected.assignee_principal_id,
     selected.assignee_principal_id,
-  ).run();
-  if (changed.meta.changes !== 1) throw new CaseWorkflowError("assignment_conflict");
-  await appendAudit(env, tenantId, "case.assignment_changed", principal, "case", caseId, {
-    from_principal_id: selected.assignee_principal_id,
-    to_principal_id: assigneePrincipalId,
-  });
+  );
+  const audit = await prepareAuditStatement(
+    env,
+    tenantId,
+    "case.assignment_changed",
+    principal,
+    "case",
+    caseId,
+    {
+      from_principal_id: selected.assignee_principal_id,
+      to_principal_id: assigneePrincipalId,
+    },
+    true,
+  );
+  const [changed] = await env.DB.batch([update, audit]);
+  if (changed?.meta.changes !== 1) throw new CaseWorkflowError("assignment_conflict");
   return {
     case_id: caseId,
     assignee_principal_id: assigneePrincipalId,
@@ -200,9 +227,9 @@ export async function transitionCase(
     if (conflicting) throw new CaseWorkflowError("reopen_conflict");
   }
   const updatedAt = new Date().toISOString();
-  let changed: D1Result;
+  let changed: D1Result | undefined;
   try {
-    changed = await env.DB.prepare(
+    const update = env.DB.prepare(
       `UPDATE cases
           SET status = ?, updated_at = ?, closed_at = ?,
               disposition_required_after = ?
@@ -215,7 +242,18 @@ export async function transitionCase(
       tenantId,
       caseId,
       selected.status,
-    ).run();
+    );
+    const audit = await prepareAuditStatement(
+      env,
+      tenantId,
+      "case.status_changed",
+      principal,
+      "case",
+      caseId,
+      { from_status: selected.status, to_status: requested },
+      true,
+    );
+    [changed] = await env.DB.batch([update, audit]);
   } catch (error) {
     const summary = error instanceof Error ? error.message : "";
     if (
@@ -227,11 +265,7 @@ export async function transitionCase(
     }
     throw error;
   }
-  if (changed.meta.changes !== 1) throw new CaseWorkflowError("invalid_transition");
-  await appendAudit(env, tenantId, "case.status_changed", principal, "case", caseId, {
-    from_status: selected.status,
-    to_status: requested,
-  });
+  if (changed?.meta.changes !== 1) throw new CaseWorkflowError("invalid_transition");
   return {
     case_id: caseId,
     status: requested,

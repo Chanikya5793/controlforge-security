@@ -1,6 +1,8 @@
-# ControlForge 0.3 deployment evidence
+# ControlForge deployment evidence
 
-Verified through 2026-08-20 in the `Chanakya Chowdary` Cloudflare account.
+Evidence checkpoints are verified through 2026-09-01 in the `Chanakya Chowdary`
+Cloudflare account. Each section is historical and remains bound to its stated artifact,
+deployment identifier, and time.
 
 ## Runtime
 
@@ -418,3 +420,69 @@ availability. The current Mac already contains an older ControlForge receipt and
 payload, so the physical preinstall verifier correctly failed those two clean-host
 checks. Clean-Mac install/reboot/upgrade/rollback/uninstall evidence, dedicated
 always-on account-service architecture, fleet scale and service objectives remain open.
+
+## 0.5.0 operational-safety staging checkpoint - 2026-09-01
+
+This checkpoint advances the source release line to `0.5.0`; it does not replace the
+signed public `0.4.0` pilot described above. No `ControlForge-0.5.0.pkg` has yet been
+built, signed, submitted to Apple, stapled, installed, or published. The installed Mac
+therefore does not contain the collector-resilience source described in this section.
+
+Before applying the operational-safety migration, production D1 was exported to the
+ignored local path
+`dist/cloud-backups/controlforge-production-pre-retention-20260831.sql`. The file is
+350,991,564 bytes, has SHA-256
+`8d2e1e96e9ad50b9293d5e1b0fa5b3d9f259f320176000bfe4ba4fbb9a5dd96f`, and is restricted
+to owner-only mode inside an owner-only directory. A separate SQLite restore check
+reported `ok`, 17 tables, seven recorded migrations, and 287,111 events. The export
+contains production data and must not be committed or shared. FileVault was disabled on
+the backup Mac at this checkpoint, so filesystem permissions do not constitute encrypted
+at-rest recovery storage.
+
+D1 migration `0008_operational_safety.sql` applied successfully. The current
+operational-safety deployment is Worker version
+`944f2d98-5bbf-4c20-9271-3f20ccbf2c07`. Its deployed bounds include:
+
+- a 500 ms Worker CPU ceiling and five-percent observability sampling;
+- database-enforced ingest budgets of 5,000 events per tenant per minute and 2,000 per
+  device per minute, with the entire batch rolled back when either budget is exceeded;
+- a configured 10,000,000,000-byte D1 capacity reference and a write stop at 90 percent;
+- direct-D1 recovery capped at 500 safe Santa rows plus 50 general rows per run, with
+  concurrency bounded at 20;
+- a one-minute scheduler for recovery, while retention keeps its own persisted cadence;
+- seven-day selective retention in batches of 200, at most five batches per run, only for
+  terminal error-free events that are not referenced by an alert; and
+- atomic alert/case mutation and integrity-audit writes, so an audit failure rolls the
+  protected mutation back instead of leaving unaudited state.
+
+A live Worker tail after redeployment showed successful scheduled, ingest, action-poll,
+and Queue-consumer executions without the prior CPU-limit failure. Each of the first two
+retention runs deleted 1,000 eligible events, recorded no retention error, and left
+referenced, unprocessed, and processing-error rows outside the deletion set.
+
+The paid-plan cutover allowed the installed signed collector to drain its retained local
+spool to zero batches. This proves recovery of the historical `0.4.0` collector, not
+installation of `0.5.0`. Its flush inserted a larger durable D1 backlog; at
+2026-09-01T06:30:46Z production contained 62,707 unprocessed rows, down from 66,877 in
+the observed recovery window, with zero processing-error rows and an observed drain rate
+of approximately 535 rows per minute. The oldest row in the preceding measurement was
+received at `2026-08-31T21:47:44.216Z`, the newest at
+`2026-09-01T06:13:52.926Z`, and D1 size was 715,612,160 bytes. These figures prove a
+downward recovery trend, not a drained cloud backlog or a completed soak test.
+
+The `0.5.0` collector source adds independent SQLite-persisted delivery and action-polling
+retry circuits, exponential delays from 60 seconds to one hour with deterministic bounded
+jitter, generic socket-error redaction, bounded per-cycle flushing, and coalescing of only
+unchanged control snapshots while preserving raw Santa telemetry and every observed state
+transition. The source gates passed:
+
+- 563 Python tests at 88.97 percent coverage, Ruff, strict MyPy, Bandit with zero findings,
+  and wheel/source-distribution builds;
+- 123 Cloudflare Worker tests at 88.21 percent line coverage, ESLint, strict TypeScript,
+  and dependency audit with zero known vulnerabilities; and
+- website lint, production build, and dependency audit with zero known vulnerabilities.
+
+Cloudflare billing showed a zero current/projected total and a $10 budget alert during this
+checkpoint. A budget alert is notification-only rather than a hard spending cap. The explicit
+CPU, sampling, admission, capacity, recovery, and retention bounds reduce accidental spend;
+they do not make paid usage free or replace daily usage review during backlog recovery.
