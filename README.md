@@ -12,17 +12,16 @@ It is an engineering portfolio project built with public fixtures plus a live, s
 
 The product website is live at
 [controlforge.chanakyachowdary.in](https://controlforge.chanakyachowdary.in).
-Its download page publishes the clean-source `0.4.0` Apple Silicon staging pilot,
+Its download page publishes the clean-source `0.5.0` Apple Silicon staging pilot,
 the matching release manifest, SHA-256 file, and release notes. The installer is
 Developer ID signed, Apple notarized and stapled. It remains a controlled pilot:
 the account service is staging, and clean-Mac install, reboot, upgrade, rollback,
 uninstall, fleet availability, and service-level acceptance are not yet complete.
 
-The repository has advanced to the `0.5.0` staging source line for collector outage
-resilience and Cloudflare operational safety. No `0.5.0` installer is published yet:
-until a clean source commit is built, signed, notarized, stapled, downloaded again, and
-accepted on a separate Mac, the public `0.4.0` package remains the latest downloadable
-artifact and the new source must not be described as an installed release.
+Version `0.5.0` adds collector outage resilience and Cloudflare operational safety. It
+was built from clean commit `a5f3b6b`, signed, notarized, stapled, published, downloaded
+again, and verified byte-for-byte. It is not installed on this development Mac and has
+not completed the separate clean-Mac lifecycle gate.
 
 ## Why this exists
 

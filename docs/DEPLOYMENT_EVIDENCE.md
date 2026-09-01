@@ -423,10 +423,9 @@ always-on account-service architecture, fleet scale and service objectives remai
 
 ## 0.5.0 operational-safety staging checkpoint - 2026-09-01
 
-This checkpoint advances the source release line to `0.5.0`; it does not replace the
-signed public `0.4.0` pilot described above. No `ControlForge-0.5.0.pkg` has yet been
-built, signed, submitted to Apple, stapled, installed, or published. The installed Mac
-therefore does not contain the collector-resilience source described in this section.
+This checkpoint advances the source release line and public staging pilot to `0.5.0`.
+The installed Mac still contains the historical collector and therefore does not yet run
+the collector-resilience source described in this section.
 
 Before applying the operational-safety migration, production D1 was exported to the
 ignored local path
@@ -439,9 +438,10 @@ contains production data and must not be committed or shared. FileVault was disa
 the backup Mac at this checkpoint, so filesystem permissions do not constitute encrypted
 at-rest recovery storage.
 
-D1 migration `0008_operational_safety.sql` applied successfully. The current
-operational-safety deployment is Worker version
-`944f2d98-5bbf-4c20-9271-3f20ccbf2c07`. Its deployed bounds include:
+D1 migration `0008_operational_safety.sql` applied successfully. Worker version
+`944f2d98-5bbf-4c20-9271-3f20ccbf2c07` established the operational-safety recovery,
+and version `0f25e282-d4b0-4993-bcf9-32b78d724b8e` then deployed the matching `0.5.0`
+runtime metadata at 100 percent traffic. Its deployed bounds include:
 
 - a 500 ms Worker CPU ceiling and five-percent observability sampling;
 - database-enforced ingest budgets of 5,000 events per tenant per minute and 2,000 per
@@ -462,13 +462,12 @@ referenced, unprocessed, and processing-error rows outside the deletion set.
 
 The paid-plan cutover allowed the installed signed collector to drain its retained local
 spool to zero batches. This proves recovery of the historical `0.4.0` collector, not
-installation of `0.5.0`. Its flush inserted a larger durable D1 backlog; at
-2026-09-01T06:30:46Z production contained 62,707 unprocessed rows, down from 66,877 in
-the observed recovery window, with zero processing-error rows and an observed drain rate
-of approximately 535 rows per minute. The oldest row in the preceding measurement was
-received at `2026-08-31T21:47:44.216Z`, the newest at
-`2026-09-01T06:13:52.926Z`, and D1 size was 715,612,160 bytes. These figures prove a
-downward recovery trend, not a drained cloud backlog or a completed soak test.
+installation of `0.5.0`. Its flush inserted a larger durable D1 backlog. Production fell
+from 66,877 pending rows to 62,707 at `2026-09-01T06:30:46Z`, then to 15,707 at the
+post-deployment check, with zero processing errors throughout. The latest pending window
+ran from `2026-09-01T04:22:38.592Z` through `2026-09-01T06:13:52.926Z`; D1 size was
+697,270,272 bytes. This proves sustained downward recovery, not a drained backlog or a
+completed soak test.
 
 The `0.5.0` collector source adds independent SQLite-persisted delivery and action-polling
 retry circuits, exponential delays from 60 seconds to one hour with deterministic bounded
@@ -481,6 +480,17 @@ transition. The source gates passed:
 - 123 Cloudflare Worker tests at 88.21 percent line coverage, ESLint, strict TypeScript,
   and dependency audit with zero known vulnerabilities; and
 - website lint, production build, and dependency audit with zero known vulnerabilities.
+
+The public `ControlForge-0.5.0.pkg` was built from clean commit
+`a5f3b6bd08ecf611d13507fe64a62094f6f0ccab` for
+`admin-staging.chanakyachowdary.in:443`. It is 14,776,985 bytes with SHA-256
+`d6eaf51fdeaa5e9d9997f3019645d0b33ee757095127a18d942da8e0b0685277`. Apple accepted
+notarization submission `74bd0fc6-e79f-4619-a096-79d6eda4c202`; the trusted Developer ID
+signature, stapled ticket, manifest and Gatekeeper assessment passed. Marketing Worker
+version `2b723c87-11fc-4ac6-b83e-35c411b9e5f8` published the package and evidence. A fresh
+HTTPS download reproduced the exact digest and independently passed manifest, signature,
+staple and Gatekeeper checks. The clean-host preinstall checks remain open because this
+development Mac already contains an older receipt and payload.
 
 Cloudflare billing showed a zero current/projected total and a $10 budget alert during this
 checkpoint. A budget alert is notification-only rather than a hard spending cap. The explicit

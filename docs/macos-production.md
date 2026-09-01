@@ -3,9 +3,9 @@
 The current `0.5.0` collector and local user application source targets Apple Silicon
 (`arm64`) Macs running macOS 13 or later. A universal Intel/Apple Silicon package is not
 yet built or validated. The package builder sets an explicit macOS 13 deployment target
-for both Swift executables and validates the PyInstaller runtime separately. No `0.5.0`
-package has been built or accepted yet; the latest downloadable signed pilot remains the
-historical `0.4.0` artifact described below.
+for both Swift executables and validates the PyInstaller runtime separately. The signed,
+notarized `0.5.0` staging pilot is publicly downloadable, but is not installed on this
+development Mac and has not completed the clean-Mac lifecycle gate.
 
 ControlForge uses the open-source North Pole Security Santa system extension as
 its macOS endpoint telemetry source. Santa is installed from its official,
@@ -292,19 +292,26 @@ network extension is not used because it requires a paid Workshop subscription.
 Do not switch to Lockdown mode until the monitor-mode execution inventory has
 been reviewed, explicit allow rules are deployed, and recovery has been tested.
 
-## 0.5.0 source candidate
+## Downloadable 0.5.0 public pilot
 
 The source release line now reports `0.5.0` across the Python package, cloud runtime
 metadata, and macOS app template. It includes the collector outage behavior documented
 above and the deployed cloud admission, capacity, direct-D1 recovery, selective-retention,
 and atomic-audit controls recorded in `DEPLOYMENT_EVIDENCE.md`.
 
-This is release metadata and verified source, not a distributable package. Before the
-version can replace the public `0.4.0` pilot, build it from a reviewed clean commit with
-the staging account host, run the complete gates, sign both executables and the installer,
-obtain and staple a new Apple notarization ticket, verify the external manifest and digest,
-download the published bytes again, and complete the clean-Mac lifecycle exercise. Do not
-reuse any `0.4.0` digest, notarization submission, or physical-acceptance result for `0.5.0`.
+The public artifact was built from clean commit
+`a5f3b6bd08ecf611d13507fe64a62094f6f0ccab` with the fixed staging account host. It is
+14,776,985 bytes with SHA-256
+`d6eaf51fdeaa5e9d9997f3019645d0b33ee757095127a18d942da8e0b0685277`. Apple accepted
+notarization submission `74bd0fc6-e79f-4619-a096-79d6eda4c202`; signature, staple,
+manifest, Gatekeeper and fresh-download checks passed. The package is available at
+`https://controlforge.chanakyachowdary.in/download`.
+
+This establishes a signed public staging pilot, not general availability. The preinstall
+verifier passed the package checks and correctly failed the clean-host checks because this
+development Mac already has an older receipt and payload. Clean-Mac install, reboot,
+upgrade, rollback and uninstall evidence remains required. Do not reuse any `0.4.0`
+digest, notarization submission or physical-acceptance result for `0.5.0`.
 
 ## Signed 0.4.0 staging candidate
 

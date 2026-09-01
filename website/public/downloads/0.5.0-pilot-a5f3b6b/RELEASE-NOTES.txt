@@ -1,0 +1,56 @@
+ControlForge 0.5.0 public pilot
+================================
+
+Availability
+------------
+This is a controlled staging pilot for Apple Silicon Macs running macOS 13 or
+newer. It is not a general-availability or enterprise-SLA release.
+
+Release identity
+----------------
+Channel: staging
+Source commit: a5f3b6bd08ecf611d13507fe64a62094f6f0ccab
+Source dirty: false
+Account service: admin-staging.chanakyachowdary.in:443
+Package SHA-256: d6eaf51fdeaa5e9d9997f3019645d0b33ee757095127a18d942da8e0b0685277
+Package size: 14,776,985 bytes
+
+What changed
+------------
+- Delivery and action polling now use independent, persistent retry circuits.
+- Network failures are redacted before they reach status or spool records.
+- Raw Santa telemetry remains durable while unchanged control snapshots coalesce.
+- Each collection cycle has a bounded backlog flush limit.
+- The cloud service adds tenant and device ingestion budgets, a storage high-water
+  stop, selective telemetry retention, bounded direct-D1 recovery, and atomic
+  audit-coupled security mutations.
+
+Verified before publication
+---------------------------
+- 563 Python tests passed with 88.98 percent coverage.
+- 123 Cloud Worker tests passed with 88.21 percent line coverage.
+- Developer ID Installer signature has a trusted timestamp.
+- Apple notarization submission 74bd0fc6-e79f-4619-a096-79d6eda4c202 was accepted.
+- The notarization ticket was stapled and validated.
+- Gatekeeper classified the package as accepted Notarized Developer ID.
+- The external release manifest matches the downloadable package.
+
+Important pilot boundaries
+--------------------------
+- The package connects to the staging account service, not a production SLA.
+- A network administrator must provide an endpoint account.
+- Santa and its required macOS approvals remain separate prerequisites.
+- Clean-Mac install, reboot, upgrade, rollback, and uninstall acceptance is not
+  yet complete. Start with a non-critical test Mac.
+- Automated containment remains fail-closed and is not enabled by this package.
+
+Verification
+------------
+Run these commands from the folder containing the downloaded package:
+
+  shasum -a 256 ControlForge-0.5.0.pkg
+  pkgutil --check-signature ControlForge-0.5.0.pkg
+  xcrun stapler validate ControlForge-0.5.0.pkg
+  spctl --assess --type install -vv ControlForge-0.5.0.pkg
+
+The measured SHA-256 must exactly equal the value above.
