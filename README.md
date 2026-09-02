@@ -342,3 +342,7 @@ The verification target runs:
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+---
+
+Built by **Chanakya Thotakura** — [chanakyachowdary.in](https://chanakyachowdary.in) · [Case study](https://chanakyachowdary.in/#/work/controlforge)
